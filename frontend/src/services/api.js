@@ -1,13 +1,12 @@
 import axios from 'axios';
-import { toast } from 'react-toastify';
+import { API_BASE_URL } from '../utils/constants';
 
-// Create axios instance
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1',
-  timeout: 30000, // 30 seconds
+  baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 
 // Request interceptor to add auth token
@@ -24,96 +23,62 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
+// Response interceptor to handle auth errors
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-
-    // Handle 401 errors (unauthorized)
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-
-      try {
-        // Try to refresh token
-        const refreshResponse = await api.post('/auth/refresh');
-        const newToken = refreshResponse.data.token;
-        
-        localStorage.setItem('auth_token', newToken);
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        
-        return api(originalRequest);
-      } catch (refreshError) {
-        // Refresh failed, redirect to login
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
-        return Promise.reject(refreshError);
-      }
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('auth_token');
+      window.location.href = '/login';
     }
-
-    // Handle other errors
-    const message = error.response?.data?.message || error.message || 'An error occurred';
-    
-    // Don't show toast for certain endpoints
-    const silentEndpoints = ['/auth/me', '/auth/refresh'];
-    const shouldShowToast = !silentEndpoints.some(endpoint => 
-      originalRequest.url?.includes(endpoint)
-    );
-
-    if (shouldShowToast && error.response?.status !== 401) {
-      toast.error(message);
-    }
-
     return Promise.reject(error);
   }
 );
 
-// Analysis Service
-export const analysisService = {
-  async analyzeEEG({ file, onProgress }) {
-    const formData = new FormData();
-    formData.append('file', file);
+export const authAPI = {
+  login: (credentials) => api.post('/auth/login', credentials),
+  signup: (userData) => api.post('/auth/signup', userData),
+  logout: () => api.post('/auth/logout'),
+  verify: () => api.get('/auth/verify'),
+};
 
-    const config = {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        const percentCompleted = Math.round(
-          (progressEvent.loaded * 100) / progressEvent.total
-        );
-        onProgress?.(percentCompleted);
-      },
-    };
+export const eegAPI = {
+  uploadInit: (metadata) => api.post('/eeg/upload:init', metadata),
+  process: (data) => api.post('/eeg/process', data),
+  getResult: (jobId) => api.get(`/eeg/result/${jobId}`),
+  listSessions: (params) => api.get('/eeg/sessions', { params }),
+};
 
-    const response = await api.post('/eeg/analyze', formData, config);
-    return response.data;
-  },
+export const textAPI = {
+  analyze: (data) => api.post('/text/analyze', data),
+};
 
-  async analyzeText({ text }) {
-    const response = await api.post('/text/analyze', { text });
-    return response.data;
-  },
+export const analysisAPI = {
+  combined: (data) => api.post('/analysis/combined', data),
+  getSummary: (sessionId) => api.get(`/analysis/summary/${sessionId}`),
+};
 
-  async analyzeCombined({ eegFile, text, onProgress }) {
-    const formData = new FormData();
-    formData.append('eeg_file', eegFile);
-    formData.append('text', text);
+export const chatAPI = {
+  sendMessage: (data) => api.post('/chat', data),
+  getHistory: (limit = 50) => api.get('/chat/history', { params: { limit } }),
+};
 
-    const config = {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        const percentCompleted = Math.round(
-          (progressEvent.loaded * 100) / progressEvent.total
-        );
-        onProgress?.(percentCompleted);
-      },
-    };
+export const careAPI = {
+  findNearby: (params) => api.get('/care/nearby', { params }),
+  getProviderDetails: (providerId) => api.get(`/care/provider/${providerId}`),
+};
 
-    const response = await api.post('/analysis/combined', formData, config);
-    return response.data;
-  },
+export const notificationAPI = {
+  subscribe: (token) => api.post('/notify/subscribe', { token }),
+  schedule: (data) => api.post('/notify/schedule', data),
+  getSettings: () => api.get('/notify/settings'),
+  updateSettings: (settings) => api.put('/notify/settings', settings),
+};
 
-  async getSessionResults(
+export const reportsAPI = {
+  getSession: (sessionId) => api.get(`/reports/session/${sessionId}`),
+  getSummary: (params) => api.get('/reports/summary', { params }),
+  export: (params) => api.get('/reports/export', { params, responseType: 'blob' }),
+};
+
+export default api;

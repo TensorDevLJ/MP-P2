@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
 import { 
   Calendar, 
   TrendingUp, 
@@ -8,20 +7,14 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle,
-  ArrowRight,
-  Brain,
-  Heart,
-  Zap,
-  Users,
-  Bell
+  ArrowRight
 } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
-import { useAPIQuery } from '../../hooks/useAPI';
-import StateCard from './StateCard';
-import QuickActions from './QuickActions';
-import LoadingSpinner from '../common/LoadingSpinner';
-import { formatDate, formatRelativeTime } from '../../utils/helpers';
-import { ROUTES } from '../../utils/constants';
+import { useAuth } from '../hooks/useAuth';
+import { useAPIQuery } from '../hooks/useAPI';
+import StateCard from '../components/dashboard/StateCard';
+import QuickActions from '../components/dashboard/QuickActions';
+import LoadingSpinner from '../components/common/LoadingSpinner';
+import { formatDate, formatRelativeTime } from '../utils/helpers';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -37,24 +30,23 @@ const Dashboard = () => {
   const { data: recentSessions, isLoading: sessionsLoading } = useAPIQuery(
     ['recent-sessions'],
     async () => {
+      // Mock data for now - would come from API
       return [
         {
           id: '1',
           type: 'eeg',
           state: 'STABLE',
           confidence: 0.87,
-          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
           emotions: { primary: 'calm', secondary: 'focused' },
-          text_sentiment: null,
         },
         {
           id: '2',
-          type: 'combined',
+          type: 'text',
           state: 'MILD',
           confidence: 0.73,
-          createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+          createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000), // 1 day ago
           emotions: { primary: 'stressed', secondary: 'tired' },
-          text_sentiment: 'slightly_negative',
         },
       ];
     }
@@ -63,66 +55,51 @@ const Dashboard = () => {
   const { data: weeklyStats } = useAPIQuery(
     ['weekly-stats'],
     async () => {
+      // Mock data - would come from API
       return {
         sessionsThisWeek: 5,
         avgConfidence: 0.82,
         dominantEmotion: 'calm',
-        improvementTrend: 12,
-        totalHoursAnalyzed: 3.2,
-        streakDays: 7,
+        improvementTrend: 12, // percentage
       };
     }
   );
 
-  const { data: todayRecommendations } = useAPIQuery(
-    ['today-recommendations'],
-    async () => {
-      return [
-        {
-          id: '1',
-          title: '5-Minute Morning Breathing',
-          description: 'Start your day with calming breathwork',
-          duration: 5,
-          completed: false,
-          type: 'breathing',
-          icon: Heart,
-        },
-        {
-          id: '2',
-          title: 'Gratitude Journaling',
-          description: 'Write down 3 things you\'re grateful for',
-          duration: 8,
-          completed: true,
-          type: 'journaling',
-          icon: CheckCircle,
-        },
-        {
-          id: '3',
-          title: 'Alpha Wave Meditation',
-          description: 'Enhance relaxation and focus',
-          duration: 15,
-          completed: false,
-          type: 'meditation',
-          icon: Brain,
-        },
-      ];
-    }
-  );
+  const mockRecommendations = [
+    {
+      title: '5-Minute Morning Breathing',
+      description: 'Start your day with calming breathwork',
+      duration: 5,
+      completed: false,
+    },
+    {
+      title: 'Gratitude Journaling',
+      description: 'Write down 3 things you\'re grateful for',
+      duration: 8,
+      completed: true,
+    },
+    {
+      title: 'Evening Meditation',
+      description: 'Wind down with guided mindfulness',
+      duration: 15,
+      completed: false,
+    },
+  ];
 
   const handleSaveSession = (sessionId) => {
     console.log('Saving session:', sessionId);
+    // Implementation would call API
   };
 
   const handleScheduleFollowup = () => {
     console.log('Scheduling follow-up');
+    // Implementation would open scheduler
   };
 
   const handleShare = (sessionId) => {
     console.log('Sharing session:', sessionId);
+    // Implementation would generate shareable report
   };
-
-  const completedCount = todayRecommendations?.filter(r => r.completed).length || 0;
-  const totalCount = todayRecommendations?.length || 0;
 
   if (sessionsLoading) {
     return (
@@ -139,38 +116,19 @@ const Dashboard = () => {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
-        className="bg-gradient-to-r from-primary-500 to-blue-600 rounded-2xl text-white p-6 lg:p-8"
+        className="bg-gradient-to-r from-primary-500 to-blue-600 rounded-2xl text-white p-6"
       >
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl lg:text-3xl font-bold mb-2">
               Good {timeOfDay}, {user?.display_name || 'there'}!
             </h1>
-            <p className="text-primary-100 text-lg mb-4">
+            <p className="text-primary-100 text-lg">
               {recentSessions?.length > 0 
                 ? `Your last analysis was ${formatRelativeTime(recentSessions[0].createdAt)}`
                 : 'Ready to start your mental health journey?'
               }
             </p>
-            
-            {weeklyStats && (
-              <div className="flex items-center space-x-6 text-sm text-primary-100">
-                <div className="flex items-center space-x-2">
-                  <Activity className="h-4 w-4" />
-                  <span>{weeklyStats.sessionsThisWeek} sessions this week</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <TrendingUp className="h-4 w-4" />
-                  <span>+{weeklyStats.improvementTrend}% improvement</span>
-                </div>
-                {weeklyStats.streakDays > 0 && (
-                  <div className="flex items-center space-x-2">
-                    <Zap className="h-4 w-4" />
-                    <span>{weeklyStats.streakDays} day streak</span>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
           <div className="hidden lg:block">
             <Activity className="h-16 w-16 text-primary-200" />
@@ -193,9 +151,7 @@ const Dashboard = () => {
                 state={recentSessions[0].state}
                 confidence={recentSessions[0].confidence}
                 lastUpdated={recentSessions[0].createdAt}
-                emotions={recentSessions[0].emotions}
-                textSentiment={recentSessions[0].text_sentiment}
-                recommendations={todayRecommendations?.slice(0, 2)}
+                recommendations={mockRecommendations.slice(0, 2)}
                 onSaveSession={() => handleSaveSession(recentSessions[0].id)}
                 onScheduleFollowup={handleScheduleFollowup}
                 onShare={() => handleShare(recentSessions[0].id)}
@@ -247,9 +203,9 @@ const Dashboard = () => {
                 </div>
                 
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Analysis hours</span>
-                  <span className="text-lg font-bold text-primary-600">
-                    {weeklyStats.totalHoursAnalyzed}h
+                  <span className="text-sm text-gray-600">Dominant mood</span>
+                  <span className="text-lg font-bold text-primary-600 capitalize">
+                    {weeklyStats.dominantEmotion}
                   </span>
                 </div>
                 
@@ -261,16 +217,6 @@ const Dashboard = () => {
                 </div>
               </div>
             )}
-
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <Link 
-                to={ROUTES.TRENDS}
-                className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center justify-center space-x-1"
-              >
-                <span>View detailed trends</span>
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
           </motion.div>
 
           {/* Today's Recommendations */}
@@ -290,49 +236,39 @@ const Dashboard = () => {
                   <p className="text-sm text-gray-500">Personalized wellness activities</p>
                 </div>
               </div>
-              <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                {completedCount}/{totalCount} complete
+              <span className="text-sm text-gray-500">
+                {mockRecommendations.filter(r => r.completed).length}/{mockRecommendations.length} complete
               </span>
             </div>
 
             <div className="space-y-3">
-              {todayRecommendations?.map((rec, index) => {
-                const Icon = rec.icon;
-                return (
-                  <div key={rec.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                    <div className="flex items-center space-x-3">
-                      {rec.completed ? (
-                        <CheckCircle className="h-5 w-5 text-success-600" />
-                      ) : (
-                        <div className="w-5 h-5 border-2 border-gray-300 rounded-full"></div>
-                      )}
-                      <Icon className="h-4 w-4 text-gray-600" />
-                      <div>
-                        <span className={`text-sm font-medium ${rec.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
-                          {rec.title}
-                        </span>
-                        <p className="text-xs text-gray-500">{rec.description}</p>
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500 flex items-center space-x-1">
-                      <Clock className="h-3 w-3" />
-                      <span>{rec.duration}m</span>
+              {mockRecommendations.map((rec, index) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    {rec.completed ? (
+                      <CheckCircle className="h-5 w-5 text-success-600" />
+                    ) : (
+                      <div className="w-5 h-5 border-2 border-gray-300 rounded-full"></div>
+                    )}
+                    <div>
+                      <span className={`text-sm font-medium ${rec.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                        {rec.title}
+                      </span>
+                      <p className="text-xs text-gray-500">{rec.description}</p>
                     </div>
                   </div>
-                );
-              })}
+                  <div className="text-xs text-gray-500 flex items-center space-x-1">
+                    <Clock className="h-3 w-3" />
+                    <span>{rec.duration}m</span>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center justify-center space-x-1 py-2">
-                <span>Start next activity</span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
-              <button className="text-gray-600 hover:text-gray-700 text-sm font-medium flex items-center justify-center space-x-1 py-2">
-                <Bell className="h-4 w-4" />
-                <span>Set reminders</span>
-              </button>
-            </div>
+            <button className="w-full mt-4 text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center justify-center space-x-1">
+              <span>View full plan</span>
+              <ArrowRight className="h-4 w-4" />
+            </button>
           </motion.div>
 
           {/* Recent Activity */}
@@ -364,17 +300,9 @@ const Dashboard = () => {
                       <span className="text-sm font-medium text-gray-900 capitalize">
                         {session.type} Analysis
                       </span>
-                      <div className="flex items-center space-x-2 text-xs text-gray-500">
-                        <span>{session.emotions.primary}</span>
-                        <span>•</span>
-                        <span>{Math.round(session.confidence * 100)}% confidence</span>
-                        {session.text_sentiment && (
-                          <>
-                            <span>•</span>
-                            <span className="capitalize">{session.text_sentiment.replace('_', ' ')}</span>
-                          </>
-                        )}
-                      </div>
+                      <p className="text-xs text-gray-500">
+                        {session.emotions.primary} • {Math.round(session.confidence * 100)}% confidence
+                      </p>
                     </div>
                   </div>
                   <span className="text-xs text-gray-500">
@@ -382,77 +310,16 @@ const Dashboard = () => {
                   </span>
                 </div>
               ))}
-
-              {(!recentSessions || recentSessions.length === 0) && (
-                <div className="text-center py-6 text-gray-500">
-                  <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No recent sessions</p>
-                  <Link 
-                    to={ROUTES.ANALYZE}
-                    className="text-primary-600 hover:text-primary-700 text-sm font-medium mt-2 inline-block"
-                  >
-                    Start your first analysis →
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <Link 
-                to={ROUTES.TRENDS}
-                className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center justify-center space-x-1"
-              >
-                <span>View all activity</span>
-                <ArrowRight className="h-4 w-4" />
-              </Link>
             </div>
           </motion.div>
         </div>
       </div>
 
-      {/* Community Insights */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.6 }}
-        className="bg-white rounded-xl shadow-lg p-6 border border-gray-200"
-      >
-        <div className="flex items-center space-x-3 mb-4">
-          <div className="p-2 bg-blue-100 rounded-lg">
-            <Users className="h-5 w-5 text-blue-600" />
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">Community Insights</h3>
-            <p className="text-sm text-gray-500">Anonymous, aggregated wellness trends</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="text-center p-4 bg-primary-50 rounded-lg">
-            <div className="text-2xl font-bold text-primary-600 mb-1">73%</div>
-            <div className="text-sm text-primary-700">Users report improved mood</div>
-            <div className="text-xs text-primary-600 mt-1">after 2 weeks of use</div>
-          </div>
-          
-          <div className="text-center p-4 bg-success-50 rounded-lg">
-            <div className="text-2xl font-bold text-success-600 mb-1">2.4x</div>
-            <div className="text-sm text-success-700">Increase in meditation</div>
-            <div className="text-xs text-success-600 mt-1">with AI recommendations</div>
-          </div>
-          
-          <div className="text-center p-4 bg-warning-50 rounded-lg">
-            <div className="text-2xl font-bold text-warning-600 mb-1">89%</div>
-            <div className="text-sm text-warning-700">Find care providers</div>
-            <div className="text-xs text-warning-600 mt-1">within 10km radius</div>
-          </div>
-        </div>
-      </motion.div>
-
       {/* Safety Notice */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.7 }}
+        transition={{ duration: 0.6, delay: 0.6 }}
         className="bg-warning-50 border border-warning-200 rounded-lg p-4"
       >
         <div className="flex items-start space-x-3">
@@ -461,7 +328,7 @@ const Dashboard = () => {
             <p className="font-medium mb-1">Medical Disclaimer</p>
             <p>
               This platform provides supportive insights based on AI analysis and should not replace professional medical advice. 
-              If you're experiencing mental health concerns, please consult with a qualified healthcare provider. For immediate crisis support, call 988.
+              If you're experiencing mental health concerns, please consult with a qualified healthcare provider.
             </p>
           </div>
         </div>

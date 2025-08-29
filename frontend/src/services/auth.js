@@ -1,146 +1,79 @@
-import api from './api';
-import Cookies from 'js-cookie';
+import { authAPI } from './api';
 
 class AuthService {
   constructor() {
-    this.token = null;
+    this.token = localStorage.getItem('auth_token');
     this.user = null;
   }
 
-  async login(email, password) {
+  async login(credentials) {
     try {
-      const response = await api.post('/auth/login', {
-        email,
-        password,
-      });
-
+      const response = await authAPI.login(credentials);
       const { token, user } = response.data;
-      this.setToken(token);
+      
+      this.token = token;
       this.user = user;
-
-      return { token, user };
+      localStorage.setItem('auth_token', token);
+      
+      return { success: true, user };
     } catch (error) {
-      throw new Error(error.response?.data?.message || 'Login failed');
+      return { 
+        success: false, 
+        error: error.response?.data?.message || 'Login failed' 
+      };
     }
   }
 
   async signup(userData) {
     try {
-      const response = await api.post('/auth/signup', userData);
-      
+      const response = await authAPI.signup(userData);
       const { token, user } = response.data;
-      this.setToken(token);
+      
+      this.token = token;
       this.user = user;
-
-      return { token, user };
+      localStorage.setItem('auth_token', token);
+      
+      return { success: true, user };
     } catch (error) {
-      throw new Error(error.response?.data?.message || 'Signup failed');
+      return { 
+        success: false, 
+        error: error.response?.data?.message || 'Signup failed' 
+      };
     }
   }
 
   async logout() {
     try {
-      await api.post('/auth/logout');
+      await authAPI.logout();
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      this.removeToken();
+      this.token = null;
       this.user = null;
+      localStorage.removeItem('auth_token');
     }
   }
 
-  async getCurrentUser() {
-    try {
-      const response = await api.get('/auth/me');
-      this.user = response.data;
-      return this.user;
-    } catch (error) {
-      this.removeToken();
-      throw new Error('Failed to get current user');
-    }
-  }
-
-  async refreshToken() {
-    try {
-      const response = await api.post('/auth/refresh');
-      const { token } = response.data;
-      this.setToken(token);
-      return token;
-    } catch (error) {
-      this.removeToken();
-      throw new Error('Token refresh failed');
-    }
-  }
-
-  setToken(token) {
-    this.token = token;
-    // Store in httpOnly cookie for security
-    Cookies.set('auth_token', token, { 
-      expires: 7, // 7 days
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
-    });
-    // Also set in localStorage as backup for API calls
-    localStorage.setItem('auth_token', token);
-  }
-
-  getToken() {
-    if (this.token) return this.token;
+  async verifyToken() {
+    if (!this.token) return false;
     
-    // Try cookie first, then localStorage
-    this.token = Cookies.get('auth_token') || localStorage.getItem('auth_token');
-    return this.token;
-  }
-
-  removeToken() {
-    this.token = null;
-    Cookies.remove('auth_token');
-    localStorage.removeItem('auth_token');
-  }
-
-  isAuthenticated() {
-    const token = this.getToken();
-    if (!token) return false;
-
     try {
-      // Basic JWT validation (check if token is not expired)
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.exp * 1000 > Date.now();
-    } catch {
+      const response = await authAPI.verify();
+      this.user = response.data.user;
+      return true;
+    } catch (error) {
+      this.logout();
       return false;
     }
   }
 
-  async updateProfile(userData) {
-    try {
-      const response = await api.put('/auth/profile', userData);
-      this.user = { ...this.user, ...response.data };
-      return this.user;
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Profile update failed');
-    }
+  isAuthenticated() {
+    return !!this.token;
   }
 
-  async changePassword(currentPassword, newPassword) {
-    try {
-      await api.put('/auth/change-password', {
-        current_password: currentPassword,
-        new_password: newPassword,
-      });
-      return { success: true };
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Password change failed');
-    }
-  }
-
-  async resetPassword(email) {
-    try {
-      await api.post('/auth/reset-password', { email });
-      return { success: true };
-    } catch (error) {
-      throw new Error(error.response?.data?.message || 'Password reset failed');
-    }
+  getUser() {
+    return this.user;
   }
 }
 
-export const authService = new AuthService();
+export default new AuthService();

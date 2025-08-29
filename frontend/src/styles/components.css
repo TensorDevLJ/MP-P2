@@ -1,0 +1,302 @@
+/* Chart.js custom styles */
+.chartjs-tooltip {
+  @apply bg-white border border-gray-200 rounded-lg shadow-lg p-3;
+}
+
+.chartjs-tooltip-title {
+  @apply font-semibold text-gray-900 mb-1;
+}
+
+.chartjs-tooltip-body {
+  @apply text-sm text-gray-700;
+}
+
+/* EEG Band Colors */
+.band-delta { color: #8B5CF6; }
+.band-theta { color: #06B6D4; }
+.band-alpha { color: #10B981; }
+.band-beta { color: #F59E0B; }
+.band-gamma { color: #EF4444; }
+
+/* Upload dropzone styles */
+.dropzone-active {
+  @apply border-primary-400 bg-primary-50;
+}
+
+.dropzone-accept {
+  @apply border-success-400 bg-success-50;
+}
+
+.dropzone-reject {
+  @apply border-error-400 bg-error-50;
+}
+
+/* Progress tracking styles */
+.progress-ring {
+  transform: rotate(-90deg);
+}
+
+.progress-ring-circle {
+  stroke-dasharray: 251.2;
+  stroke-dashoffset: 251.2;
+  transition: stroke-dashoffset 0.5s ease-in-out;
+}
+
+/* Notification styles */
+.notification-enter {
+  @apply transform translate-x-full opacity-0;
+}
+
+.notification-enter-active {
+  @apply transform translate-x-0 opacity-100 transition-all duration-300 ease-out;
+}
+
+.notification-exit {
+  @apply transform translate-x-0 opacity-100;
+}
+
+.notification-exit-active {
+  @apply transform translate-x-full opacity-0 transition-all duration-300 ease-in;
+}
+
+/* Chat message styles */
+.chat-message-user {
+  @apply bg-primary-600 text-white rounded-2xl rounded-br-md;
+}
+
+.chat-message-bot {
+  @apply bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md;
+}
+
+.typing-indicator {
+  @apply flex space-x-1;
+}
+
+.typing-dot {
+  @apply w-2 h-2 bg-gray-400 rounded-full animate-pulse;
+}
+
+/* Map styles */
+.map-container {
+  @apply rounded-lg overflow-hidden border border-gray-200;
+}
+
+.map-marker-user {
+  @apply w-4 h-4 bg-primary-600 rounded-full border-2 border-white shadow-lg;
+}
+
+.map-marker-provider {
+  @apply w-6 h-6 bg-success-600 rounded-full border-2 border-white shadow-lg flex items-center justify-center;
+}
+
+/* Provider card styles */
+.provider-card {
+  @apply bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden hover:shadow-xl transition-shadow;
+}
+
+.provider-rating {
+  @apply flex items-center space-x-1;
+}
+
+.provider-specialty {
+  @apply bg-primary-100 text-primary-700 px-2 py-1 rounded-full text-xs font-medium;
+}
+
+/* Mood calendar styles */
+.mood-calendar-day {
+  @apply aspect-square rounded-lg border-2 flex items-center justify-center text-xs font-medium transition-all hover:scale-110 cursor-pointer;
+}
+
+.mood-stable {
+  @apply bg-success-500 text-white border-success-600;
+}
+
+.mood-mild {
+  @apply bg-warning-500 text-white border-warning-600;
+}
+
+.mood-moderate {
+  @apply bg-error-500 text-white border-error-600;
+}
+
+.mood-no-data {
+  @apply bg-gray-100 text-gray-400 border-gray-200;
+}
+
+/* Achievement card styles */
+.achievement-card {
+  @apply p-4 border-2 rounded-lg transition-all hover:shadow-md;
+}
+
+.achievement-primary {
+  @apply bg-primary-100 text-primary-600 border-primary-200;
+}
+
+.achievement-success {
+  @apply bg-success-100 text-success-600 border-success-200;
+}
+
+.achievement-warning {
+  @apply bg-warning-100 text-warning-600 border-warning-200;
+}
+
+/* Loading states */
+.skeleton-text {
+  @apply h-4 bg-gray-200 rounded shimmer;
+}
+
+.skeleton-circle {
+  @apply rounded-full bg-gray-200 shimmer;
+}
+
+.skeleton-rect {
+  @apply bg-gray-200 rounded shimmer;
+}
+
+/* Form styles */
+.form-group {
+  @apply space-y-2;
+}
+
+.form-label {
+  @apply block text-sm font-medium text-gray-700;
+}
+
+.form-input {
+  @apply w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors;
+}
+
+.form-error {
+  @apply text-sm text-error-600 mt-1;
+}
+
+.form-help {
+  @apply text-sm text-gray-500 mt-1;
+}
+
+/* State indicators */
+.confidence-high {
+  @apply text-success-600;
+}
+
+.confidence-medium {
+  @apply text-warning-600;
+}
+
+.confidence-low {
+  @apply text-error-600;
+}
+
+/* Responsive text sizing */
+@screen sm {
+  .text-responsive-lg {
+    @apply text-lg;
+  }
+}
+
+@screen md {
+  .text-responsive-lg {
+    @apply text-xl;
+  }
+}
+
+@screen lg {
+  .text-responsive-lg {
+    @apply text-2xl;
+  }
+}
+
+/* Print optimization */
+@media print {
+  .print-chart {
+    @apply break-inside-avoid;
+  }
+  
+  .print-page-break {
+    page-break-before: always;
+  }
+  
+  .print-hide {
+    @apply hidden;
+  }
+}
+
+/* Enhanced focus indicators for accessibility */
+.focus-visible {
+  @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+}
+
+/* Custom checkbox and radio styles */
+.custom-checkbox {
+  @apply w-4 h-4 text-primary-600 rounded focus:ring-primary-500 border-gray-300;
+}
+
+.custom-radio {
+  @apply w-4 h-4 text-primary-600 focus:ring-primary-500 border-gray-300;
+}
+
+/* Crisis alert animations */
+@keyframes urgentPulse {
+  0%, 100% { 
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% { 
+    transform: scale(1.02);
+    opacity: 0.9;
+  }
+}
+
+.crisis-pulse {
+  animation: urgentPulse 1.5s ease-in-out infinite;
+}
+
+/* Interactive chart highlights */
+.chart-point-hover {
+  @apply transform scale-110 transition-transform duration-200;
+}
+
+/* Tooltip improvements */
+.tooltip-content {
+  @apply bg-gray-900 text-white px-3 py-2 rounded-lg text-xs font-medium;
+}
+
+.tooltip-arrow {
+  @apply absolute w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900;
+}
+
+/* Responsive grid for dashboard */
+.dashboard-grid {
+  @apply grid grid-cols-1 gap-6;
+}
+
+@screen md {
+  .dashboard-grid {
+    @apply grid-cols-2;
+  }
+}
+
+@screen lg {
+  .dashboard-grid {
+    @apply grid-cols-3;
+  }
+}
+
+@screen xl {
+  .dashboard-grid {
+    @apply grid-cols-4;
+  }
+}
+
+/* Enhanced mobile navigation */
+.mobile-nav-item {
+  @apply flex items-center space-x-3 px-4 py-3 rounded-lg font-medium transition-colors;
+}
+
+.mobile-nav-active {
+  @apply bg-primary-100 text-primary-700;
+}
+
+.mobile-nav-inactive {
+  @apply text-gray-600 hover:bg-gray-100 hover:text-gray-900;
+}

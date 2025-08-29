@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-gray-50 text-gray-900;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Chart animations */
+  .chart-container {
+    @apply relative;
+  }
+  
+  .chart-container canvas {
+    @apply rounded-lg;
+  }
+  
+  /* Custom scrollbar */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(156 163 175) rgb(243 244 246);
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-gray-100 rounded-full;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 rounded-full;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+  
+  /* Loading shimmer effect */
+  .shimmer {
+    background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  
+  /* Focus states */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+  }
+  
+  /* Button variants */
+  .btn-primary {
+    @apply bg-primary-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-success {
+    @apply bg-success-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-success-700 focus:ring-2 focus:ring-success-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-warning {
+    @apply bg-warning-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-warning-700 focus:ring-2 focus:ring-warning-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  .btn-error {
+    @apply bg-error-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-error-700 focus:ring-2 focus:ring-error-500 focus:ring-offset-2 transition-colors;
+  }
+  
+  /* Card styles */
+  .card {
+    @apply bg-white rounded-xl shadow-lg border border-gray-200 p-6;
+  }
+  
+  .card-header {
+    @apply flex items-center space-x-3 mb-6;
+  }
+  
+  .card-icon {
+    @apply p-2 rounded-lg;
+  }
+  
+  /* State indicators */
+  .state-stable {
+    @apply bg-success-50 text-success-700 border-success-200;
+  }
+  
+  .state-mild {
+    @apply bg-warning-50 text-warning-700 border-warning-200;
+  }
+  
+  .state-moderate {
+    @apply bg-error-50 text-error-700 border-error-200;
+  }
+  
+  .state-high {
+    @apply bg-error-100 text-error-800 border-error-300;
+  }
+  
+  /* Animation classes */
+  .fade-in {
+    animation: fadeIn 0.5s ease-in-out forwards;
+  }
+  
+  .slide-up {
+    animation: slideUp 0.3s ease-out forwards;
+  }
+  
+  .pulse-soft {
+    animation: pulseSoft 2s ease-in-out infinite;
+  }
+  
+  /* Chart hover effects */
+  .chart-hover-effect {
+    transition: transform 0.2s ease-in-out;
+  }
+  
+  .chart-hover-effect:hover {
+    transform: translateY(-2px);
+  }
+  
+  /* Medical disclaimer styles */
+  .medical-disclaimer {
+    @apply bg-warning-50 border border-warning-200 rounded-lg p-4;
+  }
+  
+  .medical-disclaimer-text {
+    @apply text-sm text-warning-700;
+  }
+  
+  /* Crisis alert styles */
+  .crisis-alert {
+    @apply bg-error-50 border-2 border-error-200 rounded-xl p-6 shadow-lg;
+  }
+  
+  .crisis-alert-content {
+    @apply text-error-800;
+  }
+}
+
+/* Utilities */
+@layer utilities {
+  /* Text selection */
+  .select-none {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+  
+  /* Backdrop blur for modals */
+  .backdrop-blur-sm {
+    backdrop-filter: blur(4px);
+  }
+  
+  /* Safe area for mobile */
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  /* Print styles */
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+    
+    .print-full-width {
+      width: 100% !important;
+    }
+  }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .card {
+    @apply border-2 border-gray-800;
+  }
+  
+  .btn-primary {
+    @apply bg-blue-800 border-2 border-blue-900;
+  }
+}
+
+/* Dark mode support (future enhancement) */
+@media (prefers-color-scheme: dark) {
+  .dark-mode {
+    @apply bg-gray-900 text-gray-100;
+  }
+  
+  .dark-mode .card {
+    @apply bg-gray-800 border-gray-700;
+  }
+}

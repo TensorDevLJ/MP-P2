@@ -1,184 +1,94 @@
-import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import {
-  Home,
-  Activity,
-  MessageCircle,
-  MapPin,
-  TrendingUp,
+import React from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { 
+  LayoutDashboard, 
+  Brain, 
+  MessageCircle, 
+  MapPin, 
+  TrendingUp, 
   Settings,
   HelpCircle,
-  ChevronLeft,
-  ChevronRight,
-  Brain,
+  X
 } from 'lucide-react';
+import { ROUTES } from '../../utils/constants';
 
-const Sidebar = () => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+const Sidebar = ({ isOpen, onClose }) => {
+  const location = useLocation();
 
   const navigation = [
-    {
-      name: 'Dashboard',
-      href: '/',
-      icon: Home,
-      description: 'Overview and quick actions'
-    },
-    {
-      name: 'Analyze',
-      href: '/analyze',
-      icon: Activity,
-      description: 'EEG & Text Analysis'
-    },
-    {
-      name: 'Assistant',
-      href: '/assistant',
-      icon: MessageCircle,
-      description: 'AI Health Chatbot'
-    },
-    {
-      name: 'Find Care',
-      href: '/care',
-      icon: MapPin,
-      description: 'Nearby providers'
-    },
-    {
-      name: 'Trends',
-      href: '/trends',
-      icon: TrendingUp,
-      description: 'Progress tracking'
-    },
-    {
-      name: 'Settings',
-      href: '/settings',
-      icon: Settings,
-      description: 'Account & preferences'
-    },
-    {
-      name: 'How to Use',
-      href: '/how-to-use',
-      icon: HelpCircle,
-      description: 'Guide & tutorials'
-    },
+    { name: 'Dashboard', href: ROUTES.DASHBOARD, icon: LayoutDashboard },
+    { name: 'Analyze EEG', href: ROUTES.ANALYZE, icon: Brain },
+    { name: 'Health Assistant', href: ROUTES.ASSISTANT, icon: MessageCircle },
+    { name: 'Find Care', href: ROUTES.CARE, icon: MapPin },
+    { name: 'Progress', href: ROUTES.TRENDS, icon: TrendingUp },
+    { name: 'How to Use', href: ROUTES.HOW_TO_USE, icon: HelpCircle },
+    { name: 'Settings', href: ROUTES.SETTINGS, icon: Settings },
   ];
 
   return (
-    <motion.div
-      initial={{ x: -100, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      className={`bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 flex flex-col transition-all duration-300 ${
-        isCollapsed ? 'w-16' : 'w-64'
-      }`}
-    >
-      {/* Header */}
-      <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex items-center justify-between">
-          {!isCollapsed && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex items-center space-x-2"
-            >
-              <Brain className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-              <div>
-                <h2 className="font-bold text-slate-800 dark:text-white">MindCare</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">AI Assistant</p>
-              </div>
-            </motion.div>
-          )}
-          
-          <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+    <>
+      {/* Mobile overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 lg:hidden z-40"
+          onClick={onClose}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:z-auto
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        {/* Mobile close button */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 lg:hidden">
+          <span className="text-lg font-semibold text-gray-900">Menu</span>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
           >
-            {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </motion.button>
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 px-4 py-6 space-y-1">
+          {navigation.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.href;
+            
+            return (
+              <Link
+                key={item.name}
+                to={item.href}
+                onClick={() => window.innerWidth < 1024 && onClose()}
+                className={`
+                  flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors group
+                  ${isActive 
+                    ? 'bg-primary-100 text-primary-700 shadow-sm' 
+                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  }
+                `}
+              >
+                <Icon className={`
+                  h-5 w-5 mr-3 transition-colors
+                  ${isActive ? 'text-primary-600' : 'text-gray-400 group-hover:text-gray-600'}
+                `} />
+                {item.name}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Footer info */}
+        <div className="px-4 py-4 border-t border-gray-200">
+          <div className="text-xs text-gray-500 text-center">
+            <p className="font-medium mb-1">AI-Powered Analysis</p>
+            <p>Not a replacement for professional medical advice</p>
+          </div>
         </div>
       </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-2">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          return (
-            <NavLink
-              key={item.name}
-              to={item.href}
-              className={({ isActive }) =>
-                `flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-all duration-200 group relative ${
-                  isActive
-                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-white'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <motion.div
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <Icon
-                      size={20}
-                      className={isActive ? 'text-blue-600 dark:text-blue-400' : ''}
-                    />
-                  </motion.div>
-                  
-                  {!isCollapsed && (
-                    <motion.div
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="flex-1"
-                    >
-                      <p className="font-medium">{item.name}</p>
-                      <p className="text-xs opacity-75">{item.description}</p>
-                    </motion.div>
-                  )}
-
-                  {isCollapsed && (
-                    <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 dark:bg-slate-700 text-white text-sm rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-                      {item.name}
-                    </div>
-                  )}
-
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeTab"
-                      className="absolute right-0 top-0 bottom-0 w-1 bg-blue-600 dark:bg-blue-400 rounded-l"
-                    />
-                  )}
-                </>
-              )}
-            </NavLink>
-          );
-        })}
-      </nav>
-
-      {/* Footer */}
-      <div className="p-4 border-t border-slate-200 dark:border-slate-700">
-        {!isCollapsed && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-lg p-3"
-          >
-            <div className="flex items-center space-x-2 mb-2">
-              <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
-                <span className="w-2 h-2 bg-white rounded-full"></span>
-              </div>
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                System Status
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              All systems operational
-            </p>
-          </motion.div>
-        )}
-      </div>
-    </motion.div>
+    </>
   );
 };
 

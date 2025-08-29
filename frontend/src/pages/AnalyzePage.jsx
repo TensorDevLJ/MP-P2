@@ -1,239 +1,215 @@
-// frontend/src/pages/AnalyzePage.jsx
 import React, { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { toast } from 'react-hot-toast';
-
+import { motion } from 'framer-motion';
+import { Brain, FileText, Zap, AlertTriangle } from 'lucide-react';
 import EEGUploader from '../components/analysis/EEGUploader';
 import EEGResultGrid from '../components/analysis/EEGResultGrid';
-import TextAnalysisPanel from '../components/analysis/TextAnalysisPanel';
-import { api } from '../services/api';
+import LoadingSpinner from '../components/common/LoadingSpinner';
+import { useAPIMutation } from '../hooks/useAPI';
+import { eegAPI, analysisAPI } from '../services/api';
 
 const AnalyzePage = () => {
-  const [activeTab, setActiveTab] = useState('eeg');
-  const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [analysisResults, setAnalysisResults] = useState(null);
+  const [analysisState, setAnalysisState] = useState('idle'); // idle, analyzing, complete, error
+  const [sessionData, setSessionData] = useState(null);
+  const [includeTextAnalysis, setIncludeTextAnalysis] = useState(false);
+  const [error, setError] = useState(null);
 
-  // EEG Upload Mutation
-  const uploadEEGMutation = useMutation({
-    mutationFn: (file) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      return api.post('/analysis/eeg/upload', formData);
-    },
-    onSuccess: (data) => {
-      setCurrentSessionId(data.session_id);
-      toast.success('EEG file uploaded successfully!');
+  // Mock analysis mutation - in real app would call actual API
+  const analysisMutation = useAPIMutation(
+    async (analysisData) => {
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
-      // Start polling for results
-      pollForResults(data.session_id);
+      // Mock successful response
+      return {
+        session_id: 'mock-session-' + Date.now(),
+        fusion: { risk: 'stable', confidence: 0.87 },
+        emotion: { label: 'calm', probs: { calm: 0.8, neutral: 0.15, stressed: 0.05 } },
+        anxiety: { label: 'low', score: 0.23 },
+        depression_text: includeTextAnalysis ? { label: 'not', probs: { not: 0.82, moderate: 0.15, severe: 0.03 } } : null,
+        explain: [
+          'Alpha waves show strong presence, indicating relaxed awareness',
+          'Beta activity is within normal range, suggesting good cognitive function',
+          'No significant asymmetry detected in frontal regions'
+        ],
+        recommendations: [
+          { title: 'Continue meditation practice', duration: 10, description: 'Your alpha patterns suggest meditation is working well' },
+          { title: 'Morning sunlight exposure', duration: 15, description: 'Help maintain healthy circadian rhythms' },
+        ],
+        bands_timeseries: {
+          delta: Array.from({ length: 60 }, (_, i) => 0.3 + Math.sin(i * 0.1) * 0.1),
+          theta: Array.from({ length: 60 }, (_, i) => 0.4 + Math.sin(i * 0.15) * 0.15),
+          alpha: Array.from({ length: 60 }, (_, i) => 0.8 + Math.sin(i * 0.2) * 0.2),
+          beta: Array.from({ length: 60 }, (_, i) => 0.5 + Math.sin(i * 0.25) * 0.1),
+          gamma: Array.from({ length: 60 }, (_, i) => 0.2 + Math.sin(i * 0.3) * 0.05),
+        },
+        times: Array.from({ length: 60 }, (_, i) => new Date(Date.now() + i * 1000).toISOString()),
+        psd: {
+          freqs: Array.from({ length: 50 }, (_, i) => i + 0.5),
+          power: Array.from({ length: 50 }, (_, i) => Math.exp(-i * 0.1) + Math.random() * 0.1),
+        },
+        spectrogram_image_base64: null, // Would contain actual base64 image
+        natural_explanation: 'Your brain activity shows healthy patterns typical of a relaxed, focused state. Alpha waves are prominent, indicating good mental balance, while beta activity suggests appropriate cognitive engagement without excessive stress.',
+        completed_at: new Date().toISOString(),
+      };
     },
-    onError: (error) => {
-      toast.error(error.response?.data?.detail || 'Upload failed');
+    {
+      onSuccess: (data) => {
+        setSessionData(data);
+        setAnalysisState('complete');
+      },
+      onError: (error) => {
+        setError(error.message || 'Analysis failed');
+        setAnalysisState('error');
+      },
     }
-  });
+  );
 
-  // Text Analysis Mutation
-  const textAnalysisMutation = useMutation({
-    mutationFn: (text) => api.post('/analysis/text/analyze', { text }),
-    onSuccess: (data) => {
-      setAnalysisResults(data.results);
-      toast.success('Text analysis completed!');
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.detail || 'Analysis failed');
-    }
-  });
+  const handleFileUpload = (file) => {
+    console.log('File uploaded:', file.name);
+    setError(null);
+  };
 
-  // Combined Analysis Mutation
-  const combinedAnalysisMutation = useMutation({
-    mutationFn: (data) => api.post('/analysis/combined', data),
-    onSuccess: (data) => {
-      setAnalysisResults(data);
-      toast.success('Combined analysis completed!');
-    },
-    onError: (error) => {
-      toast.error(error.response?.data?.detail || 'Combined analysis failed');
-    }
-  });
-
-  // Poll for EEG results
-  const pollForResults = async (sessionId) => {
-    let attempts = 0;
-    const maxAttempts = 60; // 2 minutes with 2-second intervals
+  const handleAnalysisStart = async (analysisData) => {
+    setAnalysisState('analyzing');
+    setError(null);
     
-    const poll = async () => {
-      try {
-        const response = await api.get(`/analysis/eeg/result/${sessionId}`);
-        
-        if (response.status === 'completed') {
-          setAnalysisResults(response.results);
-          toast.success('EEG analysis completed!');
-          return;
-        }
-        
-        if (attempts < maxAttempts) {
-          attempts++;
-          setTimeout(poll, 2000);
-        } else {
-          toast.error('Analysis timeout. Please try again.');
-        }
-      } catch (error) {
-        toast.error('Failed to get results');
-      }
-    };
-    
-    poll();
-  };
-
-  const handleEEGUpload = (file) => {
-    uploadEEGMutation.mutate(file);
-  };
-
-  const handleTextSubmit = (text) => {
-    if (text.trim().length < 10) {
-      toast.error('Please provide more detailed text for analysis');
-      return;
+    try {
+      await analysisMutation.mutateAsync(analysisData);
+    } catch (err) {
+      console.error('Analysis failed:', err);
     }
-    textAnalysisMutation.mutate(text);
   };
 
-  const handleCombinedAnalysis = (eegSessionId, text) => {
-    combinedAnalysisMutation.mutate({
-      eeg_session_id: eegSessionId,
-      text: text
-    });
+  const handleSaveSession = () => {
+    console.log('Saving session...');
+  };
+
+  const handleScheduleFollowup = () => {
+    console.log('Scheduling follow-up...');
+  };
+
+  const handleShare = () => {
+    console.log('Sharing results...');
+  };
+
+  const handleNewAnalysis = () => {
+    setAnalysisState('idle');
+    setSessionData(null);
+    setError(null);
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="bg-white rounded-lg shadow-md p-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Mental Health Analysis</h1>
-        <p className="text-gray-600">
-          Upload your EEG data and optionally provide text input for comprehensive mental health insights.
-        </p>
-      </div>
-
-      {/* Analysis Tabs */}
-      <div className="bg-white rounded-lg shadow-md">
-        <div className="border-b border-gray-200">
-          <nav className="flex space-x-8 px-6" aria-label="Tabs">
-            {[
-              { key: 'eeg', label: 'EEG Analysis', desc: 'Brainwave signal analysis' },
-              { key: 'text', label: 'Text Analysis', desc: 'Mood from written input' },
-              { key: 'combined', label: 'Combined Analysis', desc: 'EEG + Text fusion' }
-            ].map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`${
-                  activeTab === tab.key
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors`}
-              >
-                <div>
-                  <div>{tab.label}</div>
-                  <div className="text-xs text-gray-400">{tab.desc}</div>
-                </div>
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="p-6">
-          {activeTab === 'eeg' && (
-            <div className="space-y-6">
-              <EEGUploader
-                onUpload={handleEEGUpload}
-                isUploading={uploadEEGMutation.isPending}
-              />
-              
-              {analysisResults && (
-                <EEGResultGrid
-                  results={analysisResults}
-                  sessionId={currentSessionId}
-                />
-              )}
+      {/* Page Header */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+        className="bg-white rounded-xl shadow-lg p-6 border border-gray-200"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <div className="p-3 bg-primary-100 rounded-xl">
+              <Brain className="h-8 w-8 text-primary-600" />
             </div>
-          )}
-
-          {activeTab === 'text' && (
-            <TextAnalysisPanel
-              onSubmit={handleTextSubmit}
-              isAnalyzing={textAnalysisMutation.isPending}
-              results={analysisResults}
-            />
-          )}
-
-          {activeTab === 'combined' && (
-            <div className="space-y-6">
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <h3 className="font-medium text-blue-900 mb-2">Combined Analysis</h3>
-                <p className="text-blue-700 text-sm">
-                  For the most accurate results, upload EEG data and provide text input about your current mood and feelings.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-3">1. Upload EEG Data</h4>
-                  <EEGUploader
-                    onUpload={handleEEGUpload}
-                    isUploading={uploadEEGMutation.isPending}
-                    compact={true}
-                  />
-                </div>
-
-                <div>
-                  <h4 className="font-medium text-gray-900 mb-3">2. Describe Your Current State</h4>
-                  <TextAnalysisPanel
-                    onSubmit={(text) => handleCombinedAnalysis(currentSessionId, text)}
-                    isAnalyzing={combinedAnalysisMutation.isPending}
-                    compact={true}
-                    placeholder="How are you feeling today? Describe your mood, energy level, any concerns..."
-                  />
-                </div>
-              </div>
-
-              {analysisResults && (
-                <div className="mt-6">
-                  <EEGResultGrid
-                    results={analysisResults}
-                    sessionId={currentSessionId}
-                    isCombined={true}
-                  />
-                </div>
-              )}
+            <div>
+              <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">EEG Analysis</h1>
+              <p className="text-gray-600">
+                Upload your brainwave data for AI-powered mental health insights
+              </p>
             </div>
+          </div>
+          
+          {analysisState === 'complete' && (
+            <button
+              onClick={handleNewAnalysis}
+              className="bg-primary-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-700 transition-colors flex items-center space-x-2"
+            >
+              <Zap className="h-4 w-4" />
+              <span>New Analysis</span>
+            </button>
           )}
         </div>
-      </div>
+      </motion.div>
 
-      {/* Information Panel */}
-      <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-3">About Our Analysis</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <h3 className="font-medium text-purple-900 mb-2">EEG Analysis</h3>
-            <p className="text-purple-700">
-              Analyzes brainwave patterns to detect emotional states, anxiety levels, and cognitive load using advanced CNN-LSTM models.
+      {/* Analysis Flow */}
+      {analysisState === 'idle' && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+        >
+          <EEGUploader
+            onFileUpload={handleFileUpload}
+            onAnalysisStart={handleAnalysisStart}
+            includeTextAnalysis={includeTextAnalysis}
+            setIncludeTextAnalysis={setIncludeTextAnalysis}
+          />
+        </motion.div>
+      )}
+
+      {analysisState === 'analyzing' && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6 }}
+          className="bg-white rounded-xl shadow-lg p-12 border border-gray-200 text-center"
+        >
+          <LoadingSpinner size="large" message="Analyzing your EEG data..." />
+          
+          <div className="mt-8 space-y-4">
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-600">
+              <FileText className="h-4 w-4" />
+              <span>Processing signal data...</span>
+            </div>
+            
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-primary-600 h-2 rounded-full animate-pulse w-2/3"></div>
+            </div>
+            
+            <p className="text-sm text-gray-500 max-w-md mx-auto">
+              Our AI is analyzing your brainwave patterns across multiple frequency bands 
+              to provide comprehensive mental health insights.
             </p>
           </div>
-          <div>
-            <h3 className="font-medium text-blue-900 mb-2">Text Analysis</h3>
-            <p className="text-blue-700">
-              Uses natural language processing to identify depression indicators, mood patterns, and crisis signals from your written input.
-            </p>
+        </motion.div>
+      )}
+
+      {analysisState === 'error' && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          className="bg-white rounded-xl shadow-lg p-8 border border-error-200 text-center"
+        >
+          <div className="w-16 h-16 bg-error-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="h-8 w-8 text-error-600" />
           </div>
-          <div>
-            <h3 className="font-medium text-indigo-900 mb-2">Combined Insights</h3>
-            <p className="text-indigo-700">
-              Fuses objective EEG data with subjective text input for comprehensive mental health assessment and personalized recommendations.
-            </p>
-          </div>
-        </div>
-      </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Analysis Failed</h3>
+          <p className="text-gray-600 mb-6">{error}</p>
+          <button
+            onClick={handleNewAnalysis}
+            className="bg-primary-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-primary-700 transition-colors"
+          >
+            Try Again
+          </button>
+        </motion.div>
+      )}
+
+      {analysisState === 'complete' && sessionData && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <EEGResultGrid
+            sessionData={sessionData}
+            onSaveSession={handleSaveSession}
+            onScheduleFollowup={handleScheduleFollowup}
+            onShare={handleShare}
+          />
+        </motion.div>
+      )}
     </div>
   );
 };
