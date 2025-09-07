@@ -1,0 +1,183 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: eeg_postgres
+    environment:
+      POSTGRES_DB: eeg_mental_health
+      POSTGRES_USER: eeg_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password_123}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eeg_user -d eeg_mental_health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - eeg_network
+
+  # Redis for Celery and Caching
+  redis:
+    image: redis:7-alpine
+    container_name: eeg_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password_123}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - eeg_network
+
+  # FastAPI Backend
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: eeg_api
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://eeg_user:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/eeg_mental_health
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password_123}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - FCM_SERVER_KEY=${FCM_SERVER_KEY}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app
+      - eeg_uploads:/app/uploads
+      - eeg_models:/app/ml_models/saved_models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - eeg_network
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: eeg_celery_worker
+    command: celery -A app.tasks.celery_tasks worker --loglevel=info --concurrency=2
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://eeg_user:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/eeg_mental_health
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password_123}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ../backend:/app
+      - eeg_uploads:/app/uploads
+      - eeg_models:/app/ml_models/saved_models
+    depends_on:
+      - redis
+      - postgres
+      - api
+    networks:
+      - eeg_network
+
+  # Celery Beat Scheduler
+  celery-beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: eeg_celery_beat
+    command: celery -A app.tasks.celery_tasks beat --loglevel=info
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://eeg_user:${POSTGRES_PASSWORD:-secure_password_123}@postgres:5432/eeg_mental_health
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password_123}@redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+    volumes:
+      - ../backend:/app
+      - celery_beat_data:/app/celerybeat-schedule
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - eeg_network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: eeg_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+    networks:
+      - eeg_network
+
+  # Monitoring - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: eeg_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    networks:
+      - eeg_network
+
+  # Monitoring - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: eeg_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - eeg_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  eeg_uploads:
+  eeg_models:
+  celery_beat_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  eeg_network:
+    driver: bridge

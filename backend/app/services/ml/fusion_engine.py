@@ -1,287 +1,378 @@
+"""
+Fusion engine for combining EEG and text predictions with safety rules
+"""
 import numpy as np
-from typing import Dict, Optional, List
-import logging
-from datetime import datetime
+from typing import Dict, Any, Optional, List
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 class FusionEngine:
+    """Combines EEG and text predictions with safety-first rules"""
+    
     def __init__(self):
-        self.eeg_weight = 0.6  # EEG is more objective
-        self.text_weight = 0.4  # Text provides context
-        
-        # Risk level thresholds
-        self.risk_thresholds = {
-            'stable': 0.3,
-            'mild': 0.5,
-            'moderate': 0.7,
-            'high': 0.85
+        # Default fusion weights (can be calibrated per user)
+        self.default_weights = {
+            'eeg_weight': 0.6,
+            'text_weight': 0.4
         }
         
-        # Safety rules (override fusion if triggered)
+        # Risk level mapping
+        self.risk_levels = ['stable', 'mild', 'moderate', 'high']
+        
+        # Safety rules (highest priority)
         self.safety_rules = {
-            'crisis_override': True,
-            'severe_text_threshold': 0.8,
-            'high_anxiety_threshold': 0.8
+            'crisis_detected': 'high',
+            'severe_depression_text': 'high',
+            'high_anxiety_both': 'moderate'
         }
     
-    def fuse_predictions(self, eeg_results: Dict, text_results: Optional[Dict] = None) -> Dict:
-        """Fuse EEG and text predictions with safety rules"""
+    def fuse_predictions(
+        self,
+        eeg_results: Optional[Dict[str, Any]] = None,
+        text_results: Optional[Dict[str, Any]] = None,
+        user_calibration: Optional[Dict[str, float]] = None
+    ) -> Dict[str, Any]:
+        """
+        Combine EEG and text predictions with safety rules
         
-        # Initialize fusion result
-        fusion_result = {
-            'risk_level': 'stable',
-            'confidence': 0.0,
-            'components': {
-                'eeg_contribution': 0.0,
-                'text_contribution': 0.0
-            },
-            'explanation': [],
-            'recommendations': [],
-            'safety_triggered': False,
-            'timestamp': datetime.utcnow().isoformat()
-        }
+        Args:
+            eeg_results: Output from EEG model
+            text_results: Output from text classifier
+            user_calibration: Per-user weight adjustments
+            
+        Returns:
+            Fused prediction with risk level and explanations
+        """
+        
+        logger.info("Starting prediction fusion", 
+                   has_eeg=bool(eeg_results),
+                   has_text=bool(text_results))
         
         try:
-            # Extract EEG components
-            eeg_emotion_conf = eeg_results.get('emotion', {}).get('confidence', 0.0)
-            eeg_anxiety_score = eeg_results.get('anxiety', {}).get('score', 0.0)
-            eeg_anxiety_level = eeg_results.get('anxiety', {}).get('label', 'low')
+            # Apply safety rules first
+            safety_override = self._apply_safety_rules(eeg_results, text_results)
+            if safety_override:
+                return safety_override
             
-            # Calculate EEG risk score
-            eeg_risk_score = self._calculate_eeg_risk(eeg_results)
-            fusion_result['components']['eeg_contribution'] = eeg_risk_score
+            # Get fusion weights (use calibration if available)
+            weights = self._get_fusion_weights(user_calibration)
             
-            # Handle text results if available
-            text_risk_score = 0.0
-            if text_results and text_results.get('depression'):
-                text_risk_score = self._calculate_text_risk(text_results)
-                fusion_result['components']['text_contribution'] = text_risk_score
-                
-                # Check safety rules
-                safety_check = self._check_safety_rules(text_results, eeg_results)
-                if safety_check['triggered']:
-                    fusion_result.update(safety_check)
-                    return fusion_result
+            # Fuse individual predictions
+            emotion_fusion = self._fuse_emotion(eeg_results, text_results, weights)
+            anxiety_fusion = self._fuse_anxiety(eeg_results, text_results, weights)
             
-            # Calculate weighted fusion score
-            if text_results:
-                final_risk_score = (
-                    self.eeg_weight * eeg_risk_score + 
-                    self.text_weight * text_risk_score
-                )
-            else:
-                final_risk_score = eeg_risk_score
-                fusion_result['components']['text_contribution'] = 0.0
+            # Determine overall risk level
+            risk_assessment = self._assess_risk_level(emotion_fusion, anxiety_fusion, text_results)
             
-            # Determine risk level
-            risk_level, confidence = self._determine_risk_level(final_risk_score)
-            fusion_result['risk_level'] = risk_level
-            fusion_result['confidence'] = confidence
-            
-            # Generate explanations and recommendations
-            fusion_result['explanation'] = self._generate_explanation(
-                eeg_results, text_results, risk_level
+            # Generate explanation
+            explanation = self._generate_explanation(
+                eeg_results, text_results, emotion_fusion, anxiety_fusion, risk_assessment
             )
-            fusion_result['recommendations'] = self._generate_recommendations(risk_level)
+            
+            return {
+                'risk_level': risk_assessment['level'],
+                'confidence': risk_assessment['confidence'],
+                'emotion_fusion': emotion_fusion,
+                'anxiety_fusion': anxiety_fusion,
+                'explanation': explanation,
+                'weights_used': weights,
+                'safety_flags': text_results.get('safety_flags', {}) if text_results else {},
+                'recommendations_priority': self._get_recommendation_priority(risk_assessment['level'])
+            }
             
         except Exception as e:
-            logging.error(f"Error in fusion engine: {str(e)}")
-            fusion_result.update({
-                'risk_level': 'unknown',
-                'confidence': 0.0,
-                'error': str(e)
-            })
-        
-        return fusion_result
+            logger.error("Fusion failed", error=str(e))
+            raise ValueError(f"Prediction fusion failed: {str(e)}")
     
-    def _calculate_eeg_risk(self, eeg_results: Dict) -> float:
-        """Calculate risk score from EEG results"""
-        risk_score = 0.0
+    def _apply_safety_rules(
+        self, 
+        eeg_results: Optional[Dict], 
+        text_results: Optional[Dict]
+    ) -> Optional[Dict[str, Any]]:
+        """Apply safety-first rules that override fusion"""
+        
+        # Crisis detection from text
+        if text_results and text_results.get('safety_flags', {}).get('has_crisis_indicators'):
+            logger.warning("Crisis indicators detected - applying safety override")
+            return {
+                'risk_level': 'high',
+                'confidence': 0.95,
+                'safety_override': True,
+                'explanation': [
+                    "Crisis indicators detected in text input",
+                    "Immediate professional help recommended",
+                    "Safety is the top priority"
+                ],
+                'emergency_resources': True
+            }
+        
+        # Severe depression from text
+        if (text_results and 
+            text_results.get('depression', {}).get('label') == 'severe' and
+            text_results.get('depression', {}).get('confidence', 0) > 0.7):
+            
+            logger.warning("Severe depression detected - applying safety override")
+            return {
+                'risk_level': 'high',
+                'confidence': 0.9,
+                'safety_override': True,
+                'explanation': [
+                    "Severe depression indicators in text analysis",
+                    "Professional evaluation recommended within 24-48 hours",
+                    "This assessment is for guidance only, not diagnosis"
+                ]
+            }
+        
+        return None
+    
+    def _get_fusion_weights(self, user_calibration: Optional[Dict[str, float]]) -> Dict[str, float]:
+        """Get fusion weights with optional user calibration"""
+        if user_calibration:
+            return {
+                'eeg_weight': user_calibration.get('eeg_weight', self.default_weights['eeg_weight']),
+                'text_weight': user_calibration.get('text_weight', self.default_weights['text_weight'])
+            }
+        return self.default_weights.copy()
+    
+    def _fuse_emotion(
+        self, 
+        eeg_results: Optional[Dict], 
+        text_results: Optional[Dict], 
+        weights: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """Fuse emotion predictions"""
+        
+        if eeg_results and text_results:
+            # Late fusion of probabilities
+            eeg_emotion = eeg_results.get('emotion', {})
+            text_sentiment = text_results.get('sentiment', {})
+            
+            # Map sentiment to emotion (simplified)
+            emotion_mapping = {
+                'positive': 'happy',
+                'negative': 'sad',
+                'neutral': 'neutral'
+            }
+            
+            text_emotion_label = emotion_mapping.get(text_sentiment.get('label'), 'neutral')
+            
+            # Simple fusion (in production, use learned weights)
+            if eeg_emotion.get('label') == text_emotion_label:
+                confidence = min(0.95, 
+                    weights['eeg_weight'] * eeg_emotion.get('confidence', 0.5) + 
+                    weights['text_weight'] * text_sentiment.get('score', 0.5)
+                )
+                return {
+                    'label': eeg_emotion.get('label'),
+                    'confidence': confidence,
+                    'agreement': True
+                }
+            else:
+                # Disagreement - favor higher confidence
+                if eeg_emotion.get('confidence', 0) > text_sentiment.get('score', 0):
+                    return {
+                        'label': eeg_emotion.get('label'),
+                        'confidence': eeg_emotion.get('confidence', 0.5) * weights['eeg_weight'],
+                        'agreement': False
+                    }
+                else:
+                    return {
+                        'label': text_emotion_label,
+                        'confidence': text_sentiment.get('score', 0.5) * weights['text_weight'],
+                        'agreement': False
+                    }
+        
+        elif eeg_results:
+            return eeg_results.get('emotion', {})
+        elif text_results:
+            sentiment = text_results.get('sentiment', {})
+            emotion_mapping = {'positive': 'happy', 'negative': 'sad', 'neutral': 'neutral'}
+            return {
+                'label': emotion_mapping.get(sentiment.get('label'), 'neutral'),
+                'confidence': sentiment.get('score', 0.5)
+            }
+        
+        return {'label': 'neutral', 'confidence': 0.3}
+    
+    def _fuse_anxiety(
+        self, 
+        eeg_results: Optional[Dict], 
+        text_results: Optional[Dict], 
+        weights: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """Fuse anxiety predictions"""
+        
+        if eeg_results and text_results:
+            eeg_anxiety = eeg_results.get('anxiety', {})
+            text_anxiety = text_results.get('anxiety_keywords', {})
+            
+            # Convert text anxiety to same scale
+            text_level = text_anxiety.get('level', 'low')
+            
+            if eeg_anxiety.get('label') == text_level:
+                confidence = min(0.9,
+                    weights['eeg_weight'] * eeg_anxiety.get('confidence', 0.5) + 
+                    weights['text_weight'] * 0.7
+                )
+                return {
+                    'label': eeg_anxiety.get('label'),
+                    'confidence': confidence,
+                    'agreement': True
+                }
+            else:
+                # Take higher severity
+                eeg_severity = ['low', 'moderate', 'high'].index(eeg_anxiety.get('label', 'low'))
+                text_severity = ['low', 'moderate', 'high'].index(text_level)
+                
+                if eeg_severity >= text_severity:
+                    return {
+                        'label': eeg_anxiety.get('label'),
+                        'confidence': eeg_anxiety.get('confidence', 0.5) * weights['eeg_weight'],
+                        'agreement': False
+                    }
+                else:
+                    return {
+                        'label': text_level,
+                        'confidence': 0.7 * weights['text_weight'],
+                        'agreement': False
+                    }
+        
+        elif eeg_results:
+            return eeg_results.get('anxiety', {})
+        elif text_results:
+            text_anxiety = text_results.get('anxiety_keywords', {})
+            return {
+                'label': text_anxiety.get('level', 'low'),
+                'confidence': 0.6
+            }
+        
+        return {'label': 'low', 'confidence': 0.3}
+    
+    def _assess_risk_level(
+        self, 
+        emotion_fusion: Dict, 
+        anxiety_fusion: Dict, 
+        text_results: Optional[Dict]
+    ) -> Dict[str, Any]:
+        """Assess overall mental health risk level"""
+        
+        risk_scores = []
         
         # Emotion contribution
-        emotion = eeg_results.get('emotion', {})
-        emotion_label = emotion.get('label', 'unknown')
-        emotion_conf = emotion.get('confidence', 0.0)
-        
-        emotion_risk_map = {
-            'stressed': 0.8,
-            'angry': 0.7,
-            'sad': 0.6,
-            'neutral': 0.3,
-            'happy': 0.1,
-            'relaxed': 0.1
-        }
-        
-        emotion_risk = emotion_risk_map.get(emotion_label, 0.5) * emotion_conf
+        emotion_label = emotion_fusion.get('label', 'neutral')
+        if emotion_label in ['sad', 'stressed']:
+            risk_scores.append(2)
+        elif emotion_label == 'neutral':
+            risk_scores.append(1)
+        else:
+            risk_scores.append(0)
         
         # Anxiety contribution
-        anxiety = eeg_results.get('anxiety', {})
-        anxiety_score = anxiety.get('score', 0.0)
-        anxiety_level = anxiety.get('label', 'low')
+        anxiety_label = anxiety_fusion.get('label', 'low')
+        anxiety_score = ['low', 'moderate', 'high'].index(anxiety_label)
+        risk_scores.append(anxiety_score)
         
-        anxiety_risk_map = {
-            'high': 0.9,
-            'moderate': 0.6,
-            'low': 0.2
-        }
-        
-        anxiety_risk = anxiety_risk_map.get(anxiety_level, 0.5) * anxiety_score
-        
-        # Combine emotion and anxiety (weighted average)
-        risk_score = 0.4 * emotion_risk + 0.6 * anxiety_risk
-        
-        return min(risk_score, 1.0)
-    
-    def _calculate_text_risk(self, text_results: Dict) -> float:
-        """Calculate risk score from text analysis"""
-        depression = text_results.get('depression', {})
-        anxiety = text_results.get('anxiety', {})
-        
-        # Depression risk
-        depression_label = depression.get('label', 'minimal')
-        depression_conf = depression.get('confidence', 0.0)
-        
-        depression_risk_map = {
-            'severe': 0.9,
-            'moderate': 0.7,
-            'mild': 0.4,
-            'minimal': 0.1
-        }
-        
-        depression_risk = depression_risk_map.get(depression_label, 0.3) * depression_conf
-        
-        # Anxiety risk
-        anxiety_label = anxiety.get('label', 'low')
-        anxiety_conf = anxiety.get('confidence', 0.0)
-        
-        anxiety_risk_map = {
-            'high': 0.8,
-            'moderate': 0.5,
-            'low': 0.2
-        }
-        
-        anxiety_risk = anxiety_risk_map.get(anxiety_label, 0.3) * anxiety_conf
-        
-        # Combine depression and anxiety
-        risk_score = 0.7 * depression_risk + 0.3 * anxiety_risk
-        
-        return min(risk_score, 1.0)
-    
-    def _check_safety_rules(self, text_results: Dict, eeg_results: Dict) -> Dict:
-        """Check safety override rules"""
-        safety_result = {
-            'triggered': False,
-            'risk_level': 'high',
-            'confidence': 0.9,
-            'safety_triggered': True,
-            'explanation': ['Safety protocols activated'],
-            'recommendations': []
-        }
-        
-        # Crisis detection override
-        if text_results.get('crisis', {}).get('detected', False):
-            safety_result['triggered'] = True
-            safety_result['explanation'] = [
-                'Crisis indicators detected in text input',
-                'Immediate professional support recommended'
-            ]
-            safety_result['recommendations'] = [
-                'Contact emergency services if in immediate danger',
-                'Reach out to crisis helpline',
-                'Consult with mental health professional immediately'
-            ]
-            return safety_result
-        
-        # Severe depression override
-        depression = text_results.get('depression', {})
-        if (depression.get('label') == 'severe' and 
-            depression.get('confidence', 0.0) > self.safety_rules['severe_text_threshold']):
-            safety_result['triggered'] = True
-            safety_result['explanation'] = [
-                'Severe depression indicators detected',
-                'Professional evaluation strongly recommended'
-            ]
-            safety_result['recommendations'] = [
-                'Schedule appointment with mental health professional',
-                'Consider reaching out to trusted friend or family',
-                'Monitor mood closely over next few days'
-            ]
-            return safety_result
-        
-        return safety_result
-    
-    def _determine_risk_level(self, risk_score: float) -> tuple:
-        """Determine risk level from fusion score"""
-        if risk_score >= self.risk_thresholds['high']:
-            return 'high', min(risk_score, 0.95)
-        elif risk_score >= self.risk_thresholds['moderate']:
-            return 'moderate', risk_score
-        elif risk_score >= self.risk_thresholds['mild']:
-            return 'mild', risk_score
-        else:
-            return 'stable', max(risk_score, 0.5)  # Minimum confidence for stable
-    
-    def _generate_explanation(self, eeg_results: Dict, text_results: Optional[Dict], risk_level: str) -> List[str]:
-        """Generate human-readable explanation"""
-        explanations = []
-        
-        # EEG-based explanations
-        emotion = eeg_results.get('emotion', {})
-        if emotion.get('label') in ['stressed', 'angry']:
-            explanations.append(f"EEG patterns indicate {emotion['label']} emotional state")
-        
-        anxiety = eeg_results.get('anxiety', {})
-        if anxiety.get('label') == 'high':
-            explanations.append("Elevated anxiety markers detected in brain activity")
-        elif anxiety.get('label') == 'moderate':
-            explanations.append("Moderate anxiety levels observed in EEG signals")
-        
-        # Text-based explanations
+        # Depression contribution from text
         if text_results:
             depression = text_results.get('depression', {})
-            if depression.get('label') in ['moderate', 'severe']:
-                explanations.append(f"Text analysis suggests {depression['label']} depressive symptoms")
-            
-            if text_results.get('anxiety', {}).get('label') == 'high':
-                explanations.append("High anxiety levels expressed in written responses")
+            depression_label = depression.get('label', 'not_depressed')
+            if depression_label == 'severe':
+                risk_scores.append(3)
+            elif depression_label == 'moderate':
+                risk_scores.append(2)
+            else:
+                risk_scores.append(0)
         
-        # Risk level summary
-        if risk_level == 'high':
-            explanations.append("Combined indicators suggest elevated mental health risk")
-        elif risk_level == 'moderate':
-            explanations.append("Multiple factors indicate moderate concern level")
-        elif risk_level == 'mild':
-            explanations.append("Some indicators present but generally manageable")
+        # Calculate overall risk
+        avg_risk = np.mean(risk_scores)
+        max_risk = max(risk_scores)
+        
+        # Risk level determination
+        if max_risk >= 3 or avg_risk >= 2.5:
+            level = 'high'
+            confidence = 0.85
+        elif max_risk >= 2 or avg_risk >= 1.5:
+            level = 'moderate'
+            confidence = 0.75
+        elif avg_risk >= 0.5:
+            level = 'mild'
+            confidence = 0.65
         else:
-            explanations.append("Current state appears stable with low risk indicators")
+            level = 'stable'
+            confidence = 0.7
+        
+        return {
+            'level': level,
+            'confidence': confidence,
+            'risk_scores': risk_scores,
+            'avg_risk': avg_risk
+        }
+    
+    def _generate_explanation(
+        self,
+        eeg_results: Optional[Dict],
+        text_results: Optional[Dict],
+        emotion_fusion: Dict,
+        anxiety_fusion: Dict,
+        risk_assessment: Dict
+    ) -> List[str]:
+        """Generate natural language explanations"""
+        
+        explanations = []
+        
+        # EEG findings
+        if eeg_results:
+            emotion = eeg_results.get('emotion', {})
+            anxiety = eeg_results.get('anxiety', {})
+            
+            explanations.append(
+                f"EEG patterns suggest {emotion.get('label', 'neutral')} emotional state "
+                f"with {anxiety.get('label', 'low')} anxiety level"
+            )
+        
+        # Text findings
+        if text_results:
+            depression = text_results.get('depression', {})
+            sentiment = text_results.get('sentiment', {})
+            
+            explanations.append(
+                f"Text analysis indicates {depression.get('label', 'not_depressed').replace('_', ' ')} "
+                f"depression indicators with {sentiment.get('label', 'neutral')} sentiment"
+            )
+        
+        # Agreement/disagreement
+        if eeg_results and text_results:
+            if emotion_fusion.get('agreement') and anxiety_fusion.get('agreement'):
+                explanations.append("EEG and text analyses show consistent findings")
+            else:
+                explanations.append("Some differences between EEG and text analyses detected")
+        
+        # Risk level explanation
+        risk_level = risk_assessment['level']
+        if risk_level == 'high':
+            explanations.append(
+                "Risk assessment indicates need for professional evaluation and support"
+            )
+        elif risk_level == 'moderate':
+            explanations.append(
+                "Moderate risk detected - consider coping strategies and monitoring"
+            )
+        elif risk_level == 'mild':
+            explanations.append(
+                "Mild concerns detected - self-care and routine monitoring recommended"
+            )
+        else:
+            explanations.append("Analysis suggests stable mental state")
         
         return explanations
     
-    def _generate_recommendations(self, risk_level: str) -> List[str]:
-        """Generate personalized recommendations based on risk level"""
-        recommendations = {
-            'stable': [
-                "Continue current wellness practices",
-                "Regular exercise and good sleep hygiene",
-                "Maintain social connections"
-            ],
-            'mild': [
-                "Practice daily mindfulness or meditation",
-                "Engage in regular physical activity",
-                "Consider talking to a trusted friend or counselor"
-            ],
-            'moderate': [
-                "Schedule consultation with mental health professional",
-                "Implement stress reduction techniques",
-                "Monitor symptoms closely",
-                "Maintain regular sleep schedule"
-            ],
-            'high': [
-                "Seek immediate professional mental health support",
-                "Contact healthcare provider or crisis helpline",
-                "Inform trusted family member or friend",
-                "Avoid making major life decisions",
-                "Focus on basic self-care and safety"
-            ]
+    def _get_recommendation_priority(self, risk_level: str) -> str:
+        """Map risk level to recommendation priority"""
+        priority_map = {
+            'stable': 'maintenance',
+            'mild': 'prevention',
+            'moderate': 'intervention',
+            'high': 'crisis'
         }
-        
-        return recommendations.get(risk_level, recommendations['stable'])
+        return priority_map.get(risk_level, 'prevention')

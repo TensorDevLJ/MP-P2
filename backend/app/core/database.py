@@ -1,27 +1,33 @@
-
-from sqlalchemy import create_engine
+"""
+Database configuration and connection management
+"""
+from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from .config import settings
+from sqlalchemy.pool import StaticPool
 
-# Create database engine
+from app.core.config import settings
+
+# Create engine with connection pooling
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    echo=False  # Set to True for SQL debugging
+    pool_recycle=300,
+    pool_size=10,
+    max_overflow=20,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 Base = declarative_base()
 
 def get_db():
-    """Dependency to get database session"""
+    """Database dependency"""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-def create_tables():
-    """Create all tables"""
-    Base.metadata.create_all(bind=engine)
+# Metadata for migrations
+metadata = MetaData()

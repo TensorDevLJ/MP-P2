@@ -1,203 +1,212 @@
-import torch
-from transformers import RobertaTokenizer, RobertaForSequenceClassification
-from transformers import pipeline
-import numpy as np
-from typing import Dict, List
+"""
+RoBERTa-based text analysis for depression severity assessment
+"""
+from typing import Dict, List, Any, Optional
 import re
-import logging
+import structlog
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+import torch
+import numpy as np
 
-class TextDepressionClassifier:
-    def __init__(self, model_name: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logger = structlog.get_logger(__name__)
+
+class TextClassifier:
+    """Text analysis for mental health assessment"""
+    
+    def __init__(self, model_path: str = "roberta-base"):
+        self.model_path = model_path
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
-        # For demo, using sentiment analysis as proxy for depression
-        # In production, use a properly trained depression classifier
-        self.sentiment_classifier = pipeline(
-            "sentiment-analysis",
-            model=model_name,
-            device=0 if torch.cuda.is_available() else -1
-        )
+        # Depression severity classes
+        self.depression_classes = ['not_depressed', 'moderate', 'severe']
+        
+        # Anxiety keywords for supplementary analysis
+        self.anxiety_keywords = {
+            'high': ['panic', 'terror', 'overwhelming', 'catastrophic', 'unbearable'],
+            'moderate': ['anxious', 'worried', 'nervous', 'stressed', 'tense', 'uneasy'],
+            'low': ['calm', 'relaxed', 'peaceful', 'content', 'stable']
+        }
         
         # Crisis keywords for safety
         self.crisis_keywords = [
-            'suicide', 'kill myself', 'end it all', 'worthless', 
-            'hopeless', 'can\'t go on', 'want to die'
+            'suicide', 'kill myself', 'end it all', 'not worth living',
+            'self harm', 'hurt myself', 'cutting', 'overdose'
         ]
         
-        self.depression_indicators = [
-            'depressed', 'sad', 'empty', 'hopeless', 'worthless',
-            'tired', 'exhausted', 'can\'t sleep', 'no energy',
-            'anxious', 'worried', 'stressed', 'overwhelmed'
-        ]
+        self._load_models()
     
-    def preprocess_text(self, text: str) -> str:
-        """Clean and preprocess text"""
-        # Basic cleaning
-        text = re.sub(r'http\S+', '', text)  # Remove URLs
-        text = re.sub(r'@\w+', '', text)     # Remove mentions
-        text = re.sub(r'#\w+', '', text)     # Remove hashtags
-        text = re.sub(r'\s+', ' ', text)     # Normalize whitespace
-        
-        return text.strip()
-    
-    def detect_crisis(self, text: str) -> Dict:
-        """Detect crisis indicators in text"""
-        text_lower = text.lower()
-        crisis_detected = False
-        matched_keywords = []
-        
-        for keyword in self.crisis_keywords:
-            if keyword in text_lower:
-                crisis_detected = True
-                matched_keywords.append(keyword)
-        
-        return {
-            'crisis_detected': crisis_detected,
-            'matched_keywords': matched_keywords,
-            'confidence': 0.9 if crisis_detected else 0.1
-        }
-    
-    def classify_depression(self, text: str) -> Dict:
-        """Classify depression severity from text"""
+    def _load_models(self):
+        """Load text classification models"""
         try:
-            preprocessed_text = self.preprocess_text(text)
+            # For development, use a general sentiment model
+            # In production, load fine-tuned depression classifier
+            self.sentiment_pipeline = pipeline(
+                "sentiment-analysis",
+                model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+                device=0 if self.device == "cuda" else -1
+            )
             
-            # Check for crisis first
-            crisis_result = self.detect_crisis(preprocessed_text)
+            logger.info("Loaded text classification models")
             
-            # Get sentiment analysis
-            sentiment_result = self.sentiment_classifier(preprocessed_text)[0]
+        except Exception as e:
+            logger.error("Failed to load text models", error=str(e))
+            # Fallback to rule-based analysis
+            self.sentiment_pipeline = None
+    
+    def analyze_text(self, text: str) -> Dict[str, Any]:
+        """Comprehensive text analysis for mental health indicators"""
+        
+        logger.info("Starting text analysis", text_length=len(text))
+        
+        try:
+            # Preprocess text
+            cleaned_text = self._preprocess_text(text)
             
-            # Convert sentiment to depression classification
-            # This is a simplified approach - in production use trained models
-            sentiment_label = sentiment_result['label'].upper()
-            sentiment_score = sentiment_result['score']
+            # Safety check for crisis keywords
+            safety_flags = self._check_safety(cleaned_text)
             
-            # Count depression indicators
-            depression_count = sum(1 for indicator in self.depression_indicators 
-                                 if indicator in preprocessed_text.lower())
+            # Depression severity analysis
+            depression_results = self._analyze_depression(cleaned_text)
             
-            # Determine depression severity
-            if crisis_result['crisis_detected']:
-                depression_level = 'severe'
-                confidence = 0.9
-            elif sentiment_label == 'NEGATIVE' and sentiment_score > 0.8:
-                if depression_count >= 3:
-                    depression_level = 'severe'
-                    confidence = 0.8
-                elif depression_count >= 1:
-                    depression_level = 'moderate'
-                    confidence = 0.7
-                else:
-                    depression_level = 'mild'
-                    confidence = 0.6
-            elif sentiment_label == 'NEGATIVE':
-                depression_level = 'mild'
-                confidence = 0.6
-            else:
-                depression_level = 'minimal'
-                confidence = 0.7
+            # Anxiety keyword analysis
+            anxiety_results = self._analyze_anxiety_keywords(cleaned_text)
+            
+            # General sentiment
+            sentiment_results = self._analyze_sentiment(cleaned_text)
             
             return {
-                'label': depression_level,
-                'confidence': confidence,
-                'probabilities': self._generate_probabilities(depression_level, confidence),
-                'crisis_detected': crisis_result['crisis_detected'],
-                'indicators_found': depression_count,
-                'sentiment': {
-                    'label': sentiment_label,
-                    'score': sentiment_score
+                'depression': depression_results,
+                'anxiety_keywords': anxiety_results,
+                'sentiment': sentiment_results,
+                'safety_flags': safety_flags,
+                'text_stats': {
+                    'word_count': len(cleaned_text.split()),
+                    'char_count': len(cleaned_text),
+                    'sentence_count': len(re.split(r'[.!?]+', cleaned_text))
                 }
             }
             
         except Exception as e:
-            logging.error(f"Error in depression classification: {str(e)}")
-            return {
-                'label': 'unknown',
-                'confidence': 0.0,
-                'probabilities': {
-                    'minimal': 0.25,
-                    'mild': 0.25,
-                    'moderate': 0.25,
-                    'severe': 0.25
-                },
-                'crisis_detected': False,
-                'error': str(e)
-            }
+            logger.error("Text analysis failed", error=str(e))
+            raise ValueError(f"Text analysis failed: {str(e)}")
     
-    def _generate_probabilities(self, predicted_label: str, confidence: float) -> Dict:
-        """Generate probability distribution for depression levels"""
-        labels = ['minimal', 'mild', 'moderate', 'severe']
-        probs = {label: 0.1 for label in labels}  # Base probability
+    def _preprocess_text(self, text: str) -> str:
+        """Clean and preprocess text"""
+        # Basic cleaning
+        text = re.sub(r'http\S+', '', text)  # Remove URLs
+        text = re.sub(r'@\w+', '', text)     # Remove mentions
+        text = re.sub(r'\s+', ' ', text)     # Normalize whitespace
+        text = text.strip().lower()
         
-        # Assign higher probability to predicted class
-        probs[predicted_label] = confidence
-        
-        # Redistribute remaining probability
-        remaining = 1.0 - confidence
-        other_labels = [l for l in labels if l != predicted_label]
-        prob_per_other = remaining / len(other_labels)
-        
-        for label in other_labels:
-            probs[label] = prob_per_other
-            
-        return probs
-
-class TextAnalyzer:
-    def __init__(self):
-        self.depression_classifier = TextDepressionClassifier()
-        
-        # Additional analyzers
-        self.anxiety_keywords = [
-            'anxious', 'worried', 'panic', 'nervous', 'stressed',
-            'overwhelmed', 'restless', 'tense', 'fearful'
-        ]
+        return text
     
-    def analyze_text(self, text: str) -> Dict:
-        """Comprehensive text analysis"""
-        if not text or len(text.strip()) < 5:
-            return {
-                'depression': {'label': 'insufficient_data', 'confidence': 0.0},
-                'anxiety': {'label': 'insufficient_data', 'confidence': 0.0},
-                'crisis': {'detected': False}
-            }
+    def _check_safety(self, text: str) -> Dict[str, Any]:
+        """Check for crisis indicators"""
+        flags = []
         
-        # Depression analysis
-        depression_result = self.depression_classifier.classify_depression(text)
-        
-        # Anxiety analysis (simple keyword-based)
-        anxiety_result = self._analyze_anxiety(text)
+        for keyword in self.crisis_keywords:
+            if keyword in text:
+                flags.append(keyword)
         
         return {
-            'depression': depression_result,
-            'anxiety': anxiety_result,
-            'crisis': {
-                'detected': depression_result.get('crisis_detected', False),
-                'keywords': depression_result.get('matched_keywords', [])
-            },
-            'text_length': len(text),
-            'word_count': len(text.split())
+            'has_crisis_indicators': len(flags) > 0,
+            'crisis_keywords_found': flags,
+            'risk_level': 'high' if len(flags) > 0 else 'low'
         }
     
-    def _analyze_anxiety(self, text: str) -> Dict:
-        """Simple anxiety level assessment"""
-        text_lower = text.lower()
-        anxiety_count = sum(1 for keyword in self.anxiety_keywords 
-                          if keyword in text_lower)
+    def _analyze_depression(self, text: str) -> Dict[str, Any]:
+        """Analyze text for depression severity indicators"""
         
-        if anxiety_count >= 3:
+        # Depression indicator keywords
+        depression_indicators = {
+            'severe': ['hopeless', 'worthless', 'empty', 'numb', 'pointless', 'trapped'],
+            'moderate': ['sad', 'down', 'depressed', 'low', 'blue', 'unhappy', 'tired'],
+            'positive': ['happy', 'good', 'better', 'improving', 'hopeful', 'optimistic']
+        }
+        
+        scores = {'severe': 0, 'moderate': 0, 'positive': 0}
+        
+        for severity, keywords in depression_indicators.items():
+            for keyword in keywords:
+                scores[severity] += text.count(keyword)
+        
+        # Simple scoring logic
+        total_negative = scores['severe'] + scores['moderate']
+        
+        if scores['severe'] > 2 or (scores['severe'] > 0 and scores['positive'] == 0):
+            predicted_class = 'severe'
+            confidence = min(0.9, 0.6 + scores['severe'] * 0.1)
+        elif scores['moderate'] > scores['positive']:
+            predicted_class = 'moderate'
+            confidence = min(0.8, 0.5 + scores['moderate'] * 0.05)
+        else:
+            predicted_class = 'not_depressed'
+            confidence = min(0.8, 0.5 + scores['positive'] * 0.05)
+        
+        probabilities = {
+            'not_depressed': 0.8 if predicted_class == 'not_depressed' else 0.1,
+            'moderate': 0.8 if predicted_class == 'moderate' else 0.1,
+            'severe': 0.8 if predicted_class == 'severe' else 0.1
+        }
+        
+        # Normalize probabilities
+        total = sum(probabilities.values())
+        probabilities = {k: v/total for k, v in probabilities.items()}
+        
+        return {
+            'label': predicted_class,
+            'probabilities': probabilities,
+            'confidence': confidence,
+            'keyword_scores': scores
+        }
+    
+    def _analyze_anxiety_keywords(self, text: str) -> Dict[str, Any]:
+        """Analyze anxiety level based on keywords"""
+        
+        scores = {'high': 0, 'moderate': 0, 'low': 0}
+        
+        for level, keywords in self.anxiety_keywords.items():
+            for keyword in keywords:
+                scores[level] += text.count(keyword)
+        
+        # Determine level
+        if scores['high'] > 0:
             level = 'high'
-            confidence = 0.8
-        elif anxiety_count >= 1:
+        elif scores['moderate'] > scores['low']:
             level = 'moderate'
-            confidence = 0.6
         else:
             level = 'low'
-            confidence = 0.5
         
         return {
-            'label': level,
-            'confidence': confidence,
-            'indicators_found': anxiety_count,
-            'keywords_detected': [kw for kw in self.anxiety_keywords if kw in text_lower]
+            'level': level,
+            'scores': scores,
+            'total_anxiety_words': sum(scores.values())
         }
+    
+    def _analyze_sentiment(self, text: str) -> Dict[str, Any]:
+        """General sentiment analysis"""
+        
+        if self.sentiment_pipeline is None:
+            # Fallback rule-based sentiment
+            positive_words = ['good', 'great', 'happy', 'amazing', 'wonderful', 'excellent']
+            negative_words = ['bad', 'terrible', 'awful', 'horrible', 'sad', 'angry']
+            
+            pos_count = sum(text.count(word) for word in positive_words)
+            neg_count = sum(text.count(word) for word in negative_words)
+            
+            if pos_count > neg_count:
+                return {'label': 'positive', 'score': 0.7}
+            elif neg_count > pos_count:
+                return {'label': 'negative', 'score': 0.7}
+            else:
+                return {'label': 'neutral', 'score': 0.6}
+        
+        try:
+            result = self.sentiment_pipeline(text)
+            return {
+                'label': result[0]['label'].lower(),
+                'score': result[0]['score']
+            }
+        except Exception as e:
+            logger.error("Sentiment analysis failed", error=str(e))
+            return {'label': 'neutral', 'score': 0.5}

@@ -1,362 +1,345 @@
+"""
+EEG signal processing pipeline using MNE-Python
+"""
 import numpy as np
 import pandas as pd
-from scipy import signal
-from scipy.fft import fft, fftfreq
 import mne
-from sklearn.preprocessing import StandardScaler
-import torch
-import torch.nn as nn
-from typing import Dict, List, Tuple, Optional
-import base64
+from scipy import signal
+from scipy.stats import entropy
+import pywt
+from typing import Dict, List, Tuple, Any, Optional
+import structlog
 import matplotlib.pyplot as plt
-import seaborn as sns
-from io import BytesIO
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import io
+import base64
+
+logger = structlog.get_logger(__name__)
 
 class EEGProcessor:
-    def __init__(self):
-        self.sampling_rates = [128, 256, 512, 1000]
-        self.bands = {
+    """Production-ready EEG signal processing pipeline"""
+    
+    def __init__(self, sampling_rate: int = 128):
+        self.sampling_rate = sampling_rate
+        self.frequency_bands = {
             'delta': (0.5, 4),
             'theta': (4, 8),
-            'alpha': (8, 13),
-            'beta': (13, 30),
+            'alpha': (8, 12),
+            'beta': (12, 30),
             'gamma': (30, 45)
         }
-        self.scaler = StandardScaler()
         
-    def validate_eeg_data(self, data: pd.DataFrame) -> Dict:
-        """Validate EEG data format and quality"""
-        validation_result = {
-            'valid': True,
-            'messages': [],
-            'detected_sr': None,
-            'channels': [],
-            'duration': 0
-        }
+    async def extract_metadata(self, file_path: str) -> Dict[str, Any]:
+        """Extract basic metadata from EEG file"""
+        try:
+            # Read first few lines to detect format
+            df = pd.read_csv(file_path, nrows=10)
+            
+            # Detect sampling rate from header or estimate from timestamps
+            sampling_rate = self._detect_sampling_rate(df)
+            
+            # Detect channels (exclude time/timestamp columns)
+            time_cols = ['time', 'timestamp', 'Time', 'Timestamp']
+            channels = [col for col in df.columns if col not in time_cols]
+            
+            # Estimate duration
+            total_rows = len(pd.read_csv(file_path))
+            duration = total_rows / sampling_rate if sampling_rate else None
+            
+            return {
+                "sampling_rate": sampling_rate,
+                "channels": channels,
+                "duration_seconds": duration,
+                "total_samples": total_rows
+            }
+            
+        except Exception as e:
+            logger.error("Metadata extraction failed", file_path=file_path, error=str(e))
+            raise ValueError(f"Failed to extract metadata: {str(e)}")
+    
+    def _detect_sampling_rate(self, df: pd.DataFrame) -> Optional[int]:
+        """Detect sampling rate from data"""
+        # Try to find in column names
+        for col in df.columns:
+            if 'hz' in col.lower() or 'rate' in col.lower():
+                try:
+                    return int(df[col].iloc[0])
+                except:
+                    continue
+        
+        # Try common sampling rates
+        common_rates = [128, 256, 512, 1000]
+        return common_rates[0]  # Default fallback
+    
+    async def process_eeg_data(
+        self, 
+        file_path: str, 
+        channel: str = "EEG.AF3",
+        epoch_length: float = 2.0,
+        overlap: float = 0.5
+    ) -> Dict[str, Any]:
+        """Main EEG processing pipeline"""
+        
+        logger.info("Starting EEG processing", file_path=file_path, channel=channel)
         
         try:
-            # Detect sampling rate from column names
-            for col in data.columns:
-                for sr in self.sampling_rates:
-                    if str(sr) in col:
-                        validation_result['detected_sr'] = sr
-                        break
-                        
-            # Default to 128 if not detected
-            if not validation_result['detected_sr']:
-                validation_result['detected_sr'] = 128
-                validation_result['messages'].append("Sampling rate not detected, defaulting to 128 Hz")
+            # Load data
+            raw_data = self._load_eeg_data(file_path, channel)
             
-            # Identify EEG channels
-            eeg_cols = [col for col in data.columns if 'eeg' in col.lower() or 'af' in col.lower() or 'fp' in col.lower()]
-            validation_result['channels'] = eeg_cols
+            # Preprocessing
+            filtered_data = self._preprocess_signal(raw_data)
             
-            if not eeg_cols:
-                validation_result['valid'] = False
-                validation_result['messages'].append("No EEG channels detected")
-                return validation_result
+            # Epoching
+            epochs = self._create_epochs(filtered_data, epoch_length, overlap)
             
-            # Check duration (minimum 2 seconds)
-            duration = len(data) / validation_result['detected_sr']
-            validation_result['duration'] = duration
+            # Feature extraction
+            features = self._extract_features(epochs)
             
-            if duration < 2:
-                validation_result['valid'] = False
-                validation_result['messages'].append(f"Recording too short: {duration:.1f}s (minimum 2s required)")
+            # Generate visualizations
+            charts_data = self._generate_charts(filtered_data, epochs, features)
             
-            # Check for missing values
-            if data[eeg_cols].isnull().any().any():
-                validation_result['messages'].append("Missing values detected, will be interpolated")
-                
+            logger.info("EEG processing completed", 
+                       n_epochs=len(epochs), 
+                       n_features=len(features))
+            
+            return {
+                "features": features,
+                "charts": charts_data,
+                "metadata": {
+                    "n_epochs": len(epochs),
+                    "epoch_length": epoch_length,
+                    "sampling_rate": self.sampling_rate,
+                    "channel": channel
+                }
+            }
+            
         except Exception as e:
-            validation_result['valid'] = False
-            validation_result['messages'].append(f"Validation error: {str(e)}")
-            
-        return validation_result
+            logger.error("EEG processing failed", file_path=file_path, error=str(e))
+            raise ValueError(f"EEG processing failed: {str(e)}")
     
-    def preprocess_eeg(self, data: pd.DataFrame, sr: int = 128, channel: str = None) -> np.ndarray:
-        """Preprocess EEG signals"""
-        # Select channel
-        if channel and channel in data.columns:
-            eeg_data = data[channel].values
-        else:
-            # Use first EEG channel found
-            eeg_cols = [col for col in data.columns if 'eeg' in col.lower()]
-            if eeg_cols:
-                eeg_data = data[eeg_cols[0]].values
-            else:
-                raise ValueError("No EEG channels found")
+    def _load_eeg_data(self, file_path: str, channel: str) -> np.ndarray:
+        """Load EEG data from file"""
+        try:
+            df = pd.read_csv(file_path)
+            
+            if channel not in df.columns:
+                # Try to find similar channel name
+                similar_cols = [col for col in df.columns if channel.split('.')[-1] in col]
+                if similar_cols:
+                    channel = similar_cols[0]
+                else:
+                    # Use first non-time column
+                    time_cols = ['time', 'timestamp', 'Time', 'Timestamp']
+                    data_cols = [col for col in df.columns if col not in time_cols]
+                    if data_cols:
+                        channel = data_cols[0]
+                    else:
+                        raise ValueError("No data channels found")
+            
+            data = df[channel].values.astype(np.float64)
+            
+            # Remove NaN values
+            data = data[~np.isnan(data)]
+            
+            if len(data) < self.sampling_rate * 2:  # Minimum 2 seconds
+                raise ValueError("Insufficient data length")
+            
+            return data
+            
+        except Exception as e:
+            logger.error("Data loading failed", file_path=file_path, error=str(e))
+            raise
+    
+    def _preprocess_signal(self, data: np.ndarray) -> np.ndarray:
+        """Preprocess EEG signal with filtering"""
         
-        # Handle missing values
-        eeg_data = pd.Series(eeg_data).interpolate().fillna(0).values
-        
-        # Bandpass filter (0.5-45 Hz)
-        nyquist = sr / 2
+        # Band-pass filter (0.5-45 Hz)
+        nyquist = self.sampling_rate / 2
         low_freq = 0.5 / nyquist
         high_freq = 45 / nyquist
         
-        if high_freq >= 1.0:
-            high_freq = 0.99
-            
+        # Butterworth filter
         b, a = signal.butter(4, [low_freq, high_freq], btype='band')
-        filtered_data = signal.filtfilt(b, a, eeg_data)
+        filtered = signal.filtfilt(b, a, data)
         
-        # Notch filter for power line interference
-        notch_freq = 50  # or 60 for US
-        Q = 30  # Quality factor
-        b_notch, a_notch = signal.iirnotch(notch_freq, Q, sr)
-        filtered_data = signal.filtfilt(b_notch, a_notch, filtered_data)
+        # Notch filter for power line noise (50/60 Hz)
+        notch_freq = 50 / nyquist  # Adjust based on region
+        b_notch, a_notch = signal.iirnotch(notch_freq, Q=30)
+        filtered = signal.filtfilt(b_notch, a_notch, filtered)
         
-        return filtered_data
+        # Z-score normalization
+        filtered = (filtered - np.mean(filtered)) / np.std(filtered)
+        
+        return filtered
     
-    def extract_band_powers(self, eeg_data: np.ndarray, sr: int = 128, epoch_length: int = 4) -> Dict:
-        """Extract band powers using Welch's method"""
-        epoch_samples = epoch_length * sr
-        overlap_samples = epoch_samples // 2
+    def _create_epochs(self, data: np.ndarray, epoch_length: float, overlap: float) -> List[np.ndarray]:
+        """Create epochs from continuous data"""
+        epoch_samples = int(epoch_length * self.sampling_rate)
+        step_samples = int(epoch_samples * (1 - overlap))
         
-        bands_data = {
-            'times': [],
-            'bands_timeseries': {band: [] for band in self.bands.keys()},
-            'bands_per_epoch': []
+        epochs = []
+        for start in range(0, len(data) - epoch_samples + 1, step_samples):
+            epoch = data[start:start + epoch_samples]
+            epochs.append(epoch)
+        
+        return epochs
+    
+    def _extract_features(self, epochs: List[np.ndarray]) -> Dict[str, Any]:
+        """Extract comprehensive features from epochs"""
+        
+        all_band_powers = []
+        all_spectral_features = []
+        all_temporal_features = []
+        
+        for epoch in epochs:
+            # Band power features
+            band_powers = self._compute_band_powers(epoch)
+            all_band_powers.append(band_powers)
+            
+            # Spectral features
+            spectral_features = self._compute_spectral_features(epoch)
+            all_spectral_features.append(spectral_features)
+            
+            # Temporal features
+            temporal_features = self._compute_temporal_features(epoch)
+            all_temporal_features.append(temporal_features)
+        
+        # Aggregate features across epochs
+        features = {
+            'band_powers': {
+                'per_epoch': all_band_powers,
+                'mean': {band: np.mean([bp[band] for bp in all_band_powers]) 
+                        for band in self.frequency_bands.keys()},
+                'std': {band: np.std([bp[band] for bp in all_band_powers]) 
+                       for band in self.frequency_bands.keys()}
+            },
+            'spectral_features': {
+                'per_epoch': all_spectral_features,
+                'mean': {key: np.mean([sf[key] for sf in all_spectral_features]) 
+                        for key in all_spectral_features[0].keys()},
+            },
+            'temporal_features': {
+                'per_epoch': all_temporal_features,
+                'mean': {key: np.mean([tf[key] for tf in all_temporal_features]) 
+                        for key in all_temporal_features[0].keys()},
+            }
         }
         
-        # Create epochs
-        for start in range(0, len(eeg_data) - epoch_samples + 1, overlap_samples):
-            end = start + epoch_samples
-            epoch = eeg_data[start:end]
-            
-            # Calculate PSD using Welch's method
-            freqs, psd = signal.welch(epoch, sr, nperseg=min(len(epoch), sr))
-            
-            # Extract band powers
-            epoch_bands = {}
-            start_time = start / sr
-            end_time = end / sr
-            
-            for band_name, (low_freq, high_freq) in self.bands.items():
-                freq_mask = (freqs >= low_freq) & (freqs <= high_freq)
-                band_power = np.trapz(psd[freq_mask], freqs[freq_mask])
-                epoch_bands[band_name] = float(band_power)
-                bands_data['bands_timeseries'][band_name].append(band_power)
-            
-            bands_data['times'].append(start_time)
-            bands_data['bands_per_epoch'].append({
-                'start_time': start_time,
-                'end_time': end_time,
-                **epoch_bands
-            })
-        
-        return bands_data
+        return features
     
-    def compute_spectrograms(self, eeg_data: np.ndarray, sr: int = 128) -> Dict:
-        """Compute spectrogram for visualization"""
-        nperseg = min(sr * 2, len(eeg_data) // 8)  # 2-second windows
+    def _compute_band_powers(self, epoch: np.ndarray) -> Dict[str, float]:
+        """Compute power spectral density for frequency bands"""
+        freqs, psd = signal.welch(epoch, fs=self.sampling_rate, nperseg=min(256, len(epoch)))
         
-        freqs, times, Sxx = signal.spectrogram(
-            eeg_data, sr, 
-            nperseg=nperseg,
-            noverlap=nperseg//2,
-            scaling='density'
-        )
+        band_powers = {}
+        for band_name, (low_freq, high_freq) in self.frequency_bands.items():
+            idx = np.logical_and(freqs >= low_freq, freqs <= high_freq)
+            band_power = np.sum(psd[idx])
+            band_powers[band_name] = float(band_power)
         
-        # Convert to dB
-        Sxx_db = 10 * np.log10(Sxx + 1e-10)
+        return band_powers
+    
+    def _compute_spectral_features(self, epoch: np.ndarray) -> Dict[str, float]:
+        """Compute spectral features beyond band powers"""
+        freqs, psd = signal.welch(epoch, fs=self.sampling_rate)
+        
+        # Spectral entropy
+        psd_norm = psd / np.sum(psd)
+        spectral_entropy = entropy(psd_norm)
+        
+        # Peak frequency
+        peak_freq = freqs[np.argmax(psd)]
+        
+        # Spectral edge frequency (95% power)
+        cumsum_psd = np.cumsum(psd)
+        total_power = cumsum_psd[-1]
+        edge_freq_idx = np.where(cumsum_psd >= 0.95 * total_power)[0][0]
+        edge_freq = freqs[edge_freq_idx]
         
         return {
-            'freqs': freqs.tolist(),
-            'times': times.tolist(),
-            'power_db': Sxx_db.tolist()
+            'spectral_entropy': float(spectral_entropy),
+            'peak_frequency': float(peak_freq),
+            'spectral_edge_freq': float(edge_freq),
+            'total_power': float(np.sum(psd))
         }
     
-    def generate_visualizations(self, bands_data: Dict, spectrogram_data: Dict) -> Dict:
-        """Generate base64 encoded visualization images"""
-        plt.style.use('seaborn-v0_8-darkgrid')
-        visualizations = {}
+    def _compute_temporal_features(self, epoch: np.ndarray) -> Dict[str, float]:
+        """Compute temporal domain features (Hjorth parameters)"""
         
-        # Band powers time series
-        fig, ax = plt.subplots(figsize=(12, 6))
-        times = bands_data['times']
+        # First and second derivatives
+        first_deriv = np.diff(epoch)
+        second_deriv = np.diff(first_deriv)
         
-        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8']
-        for i, (band_name, powers) in enumerate(bands_data['bands_timeseries'].items()):
-            ax.plot(times, powers, label=band_name.title(), color=colors[i], linewidth=2)
+        # Hjorth Activity (variance)
+        activity = np.var(epoch)
         
-        ax.set_xlabel('Time (seconds)')
-        ax.set_ylabel('Power (µV²)')
-        ax.set_title('EEG Band Powers Over Time')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        # Hjorth Mobility
+        mobility = np.sqrt(np.var(first_deriv) / np.var(epoch))
         
-        # Save as base64
-        buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight', facecolor='white')
-        buffer.seek(0)
-        bands_image = base64.b64encode(buffer.getvalue()).decode()
-        plt.close()
+        # Hjorth Complexity
+        complexity = np.sqrt(np.var(second_deriv) / np.var(first_deriv)) / mobility
+        
+        # Zero crossing rate
+        zero_crossings = len(np.where(np.diff(np.signbit(epoch)))[0])
+        zcr = zero_crossings / len(epoch)
+        
+        return {
+            'hjorth_activity': float(activity),
+            'hjorth_mobility': float(mobility),
+            'hjorth_complexity': float(complexity),
+            'zero_crossing_rate': float(zcr),
+            'variance': float(np.var(epoch)),
+            'skewness': float(signal.skew(epoch)),
+            'kurtosis': float(signal.kurtosis(epoch))
+        }
+    
+    def _generate_charts(self, data: np.ndarray, epochs: List[np.ndarray], features: Dict) -> Dict[str, Any]:
+        """Generate chart data for visualization"""
+        
+        # Time series for band powers
+        times = np.arange(len(epochs)) * (len(epochs[0]) / self.sampling_rate)
+        band_timeseries = {
+            band: [features['band_powers']['per_epoch'][i][band] for i in range(len(epochs))]
+            for band in self.frequency_bands.keys()
+        }
+        
+        # Power spectral density
+        freqs, psd_avg = signal.welch(data, fs=self.sampling_rate)
         
         # Spectrogram
-        fig, ax = plt.subplots(figsize=(12, 6))
-        freqs = np.array(spectrogram_data['freqs'])
-        times = np.array(spectrogram_data['times'])
-        power_db = np.array(spectrogram_data['power_db'])
+        f_spec, t_spec, Sxx = signal.spectrogram(
+            data, 
+            fs=self.sampling_rate, 
+            nperseg=256,
+            noverlap=128
+        )
         
-        im = ax.pcolormesh(times, freqs, power_db, shading='gouraud', cmap='viridis')
-        ax.set_xlabel('Time (seconds)')
-        ax.set_ylabel('Frequency (Hz)')
-        ax.set_title('EEG Spectrogram')
-        ax.set_ylim(0, 45)  # Focus on relevant frequencies
-        plt.colorbar(im, ax=ax, label='Power (dB)')
+        # Convert spectrogram to base64 image
+        plt.figure(figsize=(12, 6))
+        plt.pcolormesh(t_spec, f_spec, 10 * np.log10(Sxx), shading='gouraud')
+        plt.ylabel('Frequency [Hz]')
+        plt.xlabel('Time [s]')
+        plt.title('EEG Spectrogram')
+        plt.colorbar(label='Power [dB]')
+        plt.ylim([0.5, 45])
         
-        buffer = BytesIO()
-        plt.savefig(buffer, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+        # Save plot to base64
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
         buffer.seek(0)
-        spectrogram_image = base64.b64encode(buffer.getvalue()).decode()
+        spectrogram_b64 = base64.b64encode(buffer.getvalue()).decode()
         plt.close()
         
         return {
-            'bands_chart': bands_image,
-            'spectrogram': spectrogram_image
+            "bands_timeseries": {
+                "times": times.tolist(),
+                "data": band_timeseries
+            },
+            "psd": {
+                "frequencies": freqs.tolist(),
+                "power": psd_avg.tolist()
+            },
+            "spectrogram_base64": spectrogram_b64,
+            "spectrogram_extent": [t_spec.min(), t_spec.max(), f_spec.min(), f_spec.max()]
         }
-
-class EEGCNNLSTMModel(nn.Module):
-    """CNN-LSTM model for EEG emotion classification"""
-    
-    def __init__(self, input_channels=1, sequence_length=512, num_classes=5):
-        super(EEGCNNLSTMModel, self).__init__()
-        
-        # CNN layers for spatial feature extraction
-        self.conv1 = nn.Conv1d(input_channels, 32, kernel_size=5, padding=2)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=5, padding=2)
-        self.conv3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
-        
-        # Batch normalization and dropout
-        self.bn1 = nn.BatchNorm1d(32)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(128)
-        self.dropout1 = nn.Dropout(0.3)
-        self.dropout2 = nn.Dropout(0.4)
-        
-        # LSTM for temporal modeling
-        self.lstm = nn.LSTM(128, 64, batch_first=True, bidirectional=True)
-        self.lstm_dropout = nn.Dropout(0.5)
-        
-        # Classification head
-        self.fc1 = nn.Linear(128, 64)  # 64*2 for bidirectional
-        self.fc2 = nn.Linear(64, num_classes)
-        
-        # Activation functions
-        self.relu = nn.ReLU()
-        self.softmax = nn.Softmax(dim=1)
-        
-    def forward(self, x):
-        # CNN feature extraction
-        x = self.relu(self.bn1(self.conv1(x)))
-        x = self.dropout1(x)
-        x = nn.MaxPool1d(2)(x)
-        
-        x = self.relu(self.bn2(self.conv2(x)))
-        x = self.dropout1(x)
-        x = nn.MaxPool1d(2)(x)
-        
-        x = self.relu(self.bn3(self.conv3(x)))
-        x = self.dropout2(x)
-        x = nn.MaxPool1d(2)(x)
-        
-        # Reshape for LSTM (batch, sequence, features)
-        x = x.transpose(1, 2)
-        
-        # LSTM processing
-        lstm_out, (h_n, c_n) = self.lstm(x)
-        
-        # Use last LSTM output
-        x = lstm_out[:, -1, :]
-        x = self.lstm_dropout(x)
-        
-        # Classification
-        x = self.relu(self.fc1(x))
-        x = self.fc2(x)
-        
-        return self.softmax(x)
-
-class EEGModelInference:
-    def __init__(self, model_path: str = None):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = EEGCNNLSTMModel()
-        
-        if model_path:
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-        
-        self.model.to(self.device)
-        self.model.eval()
-        
-        self.emotion_labels = ['happy', 'sad', 'angry', 'relaxed', 'stressed']
-        self.anxiety_labels = ['low', 'moderate', 'high']
-    
-    def predict_emotion(self, eeg_features: np.ndarray) -> Dict:
-        """Predict emotion from EEG features"""
-        try:
-            # Prepare input tensor
-            input_tensor = torch.FloatTensor(eeg_features).unsqueeze(0).to(self.device)
-            
-            with torch.no_grad():
-                outputs = self.model(input_tensor)
-                probabilities = outputs.cpu().numpy()[0]
-            
-            # Get prediction
-            predicted_class = np.argmax(probabilities)
-            
-            return {
-                'label': self.emotion_labels[predicted_class],
-                'confidence': float(probabilities[predicted_class]),
-                'probabilities': {
-                    label: float(prob) for label, prob in 
-                    zip(self.emotion_labels, probabilities)
-                }
-            }
-        except Exception as e:
-            return {
-                'label': 'unknown',
-                'confidence': 0.0,
-                'probabilities': {label: 0.2 for label in self.emotion_labels},
-                'error': str(e)
-            }
-    
-    def assess_anxiety(self, band_powers: Dict) -> Dict:
-        """Assess anxiety level from band power features"""
-        try:
-            # Simple rule-based anxiety assessment
-            # In production, this would use a trained model
-            
-            alpha_power = np.mean([epoch['alpha'] for epoch in band_powers['bands_per_epoch']])
-            beta_power = np.mean([epoch['beta'] for epoch in band_powers['bands_per_epoch']])
-            
-            # Anxiety indicators: low alpha, high beta
-            alpha_ratio = alpha_power / (alpha_power + beta_power)
-            
-            if alpha_ratio < 0.3:
-                anxiety_level = 'high'
-                confidence = 0.8
-            elif alpha_ratio < 0.5:
-                anxiety_level = 'moderate'
-                confidence = 0.7
-            else:
-                anxiety_level = 'low'
-                confidence = 0.75
-            
-            return {
-                'label': anxiety_level,
-                'confidence': confidence,
-                'score': 1.0 - alpha_ratio,
-                'indicators': {
-                    'alpha_suppression': alpha_power < 0.1,
-                    'beta_elevation': beta_power > 0.2,
-                    'alpha_beta_ratio': alpha_ratio
-                }
-            }
-        except Exception as e:
-            return {
-                'label': 'unknown',
-                'confidence': 0.0,
-                'score': 0.0,
-                'error': str(e)
-            }
