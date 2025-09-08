@@ -12,6 +12,8 @@ import structlog
 import sentry_sdk
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from sentry_sdk.integrations.fastapi import FastApiIntegration
+import time
+import jwt
 
 from app.core.config import settings
 from app.core.database import engine, Base
@@ -57,6 +59,10 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
     logger.info("Starting EEG Mental Health Assistant API")
+    
+    # Create upload directory
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    
     await create_tables()
     yield
     # Shutdown
@@ -170,13 +176,11 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    import time
-    import jwt
     
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8000,
+        port=settings.PORT,
         reload=settings.ENVIRONMENT == "development",
         log_config=None,  # Use structlog instead
     )

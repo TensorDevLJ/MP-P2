@@ -38,16 +38,14 @@ class Settings(BaseSettings):
         env="ALLOWED_HOSTS"
     )
     
-    # File Storage
-    AWS_ACCESS_KEY_ID: Optional[str] = Field(default=None, env="AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY: Optional[str] = Field(default=None, env="AWS_SECRET_ACCESS_KEY")
-    AWS_REGION: str = Field(default="us-east-1", env="AWS_REGION")
-    S3_BUCKET: Optional[str] = Field(default=None, env="S3_BUCKET")
+    # File Storage (Local for Render)
+    UPLOAD_DIR: str = Field(default="/tmp/uploads", env="UPLOAD_DIR")
+    MAX_FILE_SIZE: int = Field(default=50 * 1024 * 1024, env="MAX_FILE_SIZE")  # 50MB
     
-    # AI/ML Services
-    OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    # Free AI APIs
     COHERE_API_KEY: Optional[str] = Field(default=None, env="COHERE_API_KEY")
-    GOOGLE_API_KEY: Optional[str] = Field(default=None, env="GOOGLE_API_KEY")
+    GROQ_API_KEY: Optional[str] = Field(default=None, env="GROQ_API_KEY")
+    GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
     
     # Google Maps
     GOOGLE_MAPS_API_KEY: Optional[str] = Field(default=None, env="GOOGLE_MAPS_API_KEY")
@@ -76,6 +74,10 @@ class Settings(BaseSettings):
     DEFAULT_SAMPLING_RATE: int = Field(default=128, env="DEFAULT_SAMPLING_RATE")
     DEFAULT_EPOCH_LENGTH: float = Field(default=2.0, env="DEFAULT_EPOCH_LENGTH")
     DEFAULT_OVERLAP: float = Field(default=0.5, env="DEFAULT_OVERLAP")
+    
+    # Render specific settings
+    PORT: int = Field(default=8000, env="PORT")
+    RENDER_EXTERNAL_URL: Optional[str] = Field(default=None, env="RENDER_EXTERNAL_URL")
     
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v: Any) -> List[str]:

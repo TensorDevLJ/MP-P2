@@ -1,25 +1,34 @@
 """
-LLM-powered health chatbot with safety guardrails
+LLM-powered health chatbot with safety guardrails using free APIs
 """
-import openai
+import cohere
+import google.generativeai as genai
+from groq import Groq
 from typing import Dict, List, Any, Optional
 import structlog
-from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from langchain.memory import ConversationBufferWindowMemory
 
 from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 
 class HealthChatbot:
-    """AI-powered health chatbot with safety guardrails"""
+    """AI-powered health chatbot with safety guardrails using free APIs"""
     
     def __init__(self):
-        self.openai_client = None
-        if settings.OPENAI_API_KEY:
-            self.openai_client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        # Initialize free API clients
+        self.cohere_client = None
+        self.groq_client = None
+        self.gemini_model = None
+        
+        if settings.COHERE_API_KEY:
+            self.cohere_client = cohere.Client(settings.COHERE_API_KEY)
+        
+        if settings.GROQ_API_KEY:
+            self.groq_client = Groq(api_key=settings.GROQ_API_KEY)
+        
+        if settings.GEMINI_API_KEY:
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            self.gemini_model = genai.GenerativeModel('gemini-pro')
         
         # Safety keywords that trigger refusal
         self.unsafe_topics = [
@@ -56,12 +65,6 @@ You can discuss:
 - When to seek professional help
 
 Always end responses with appropriate disclaimers about not replacing professional care."""
-
-        self.memory = ConversationBufferWindowMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            k=5  # Remember last 5 exchanges
-        )
     
     async def chat(
         self,
@@ -84,7 +87,7 @@ Always end responses with appropriate disclaimers about not replacing profession
                 return self._handle_crisis_response(message, safety_check)
             
             # Generate response
-            if self.openai_client:
+            if self.cohere_client or self.groq_client or self.gemini_model:
                 response = await self._generate_llm_response(message, user_context)
             else:
                 response = self._generate_fallback_response(message)
@@ -164,7 +167,7 @@ Would you like me to help you find mental health professionals in your area?"""
         message: str, 
         user_context: Optional[Dict[str, Any]]
     ) -> str:
-        """Generate response using LLM"""
+        """Generate response using free LLM APIs"""
         
         # Build context-aware prompt
         context_info = ""
@@ -177,20 +180,47 @@ Would you like me to help you find mental health professionals in your area?"""
         full_prompt = f"{self.system_prompt}\n{context_info}\nUser: {message}\nAssistant:"
         
         try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": self.system_prompt + context_info},
-                    {"role": "user", "content": message}
-                ],
-                max_tokens=400,
-                temperature=0.7
-            )
+            # Try Groq first (fastest and highest daily limit)
+            if self.groq_client:
+                try:
+                    response = self.groq_client.chat.completions.create(
+                        model="llama3-8b-8192",
+                        messages=[
+                            {"role": "system", "content": self.system_prompt + context_info},
+                            {"role": "user", "content": message}
+                        ],
+                        max_tokens=400,
+                        temperature=0.7
+                    )
+                    return response.choices[0].message.content.strip()
+                except Exception as e:
+                    logger.warning("Groq API failed, trying next", error=str(e))
             
-            return response.choices[0].message.content.strip()
+            # Try Gemini (good rate limits)
+            if self.gemini_model:
+                try:
+                    response = self.gemini_model.generate_content(full_prompt)
+                    return response.text.strip()
+                except Exception as e:
+                    logger.warning("Gemini API failed, trying next", error=str(e))
+            
+            # Try Cohere (lowest limits but reliable)
+            if self.cohere_client:
+                try:
+                    response = self.cohere_client.generate(
+                        model='command-light',
+                        prompt=full_prompt,
+                        max_tokens=400,
+                        temperature=0.7
+                    )
+                    return response.generations[0].text.strip()
+                except Exception as e:
+                    logger.warning("Cohere API failed", error=str(e))
+            
+            return self._generate_fallback_response(message)
             
         except Exception as e:
-            logger.error("LLM generation failed", error=str(e))
+            logger.error("All LLM APIs failed", error=str(e))
             return self._generate_fallback_response(message)
     
     def _generate_fallback_response(self, message: str) -> str:

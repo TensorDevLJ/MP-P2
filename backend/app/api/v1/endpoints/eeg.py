@@ -44,10 +44,10 @@ async def upload_eeg_file(
         # Generate unique file key
         file_key = f"eeg/{current_user.id}/{uuid.uuid4()}/{file.filename}"
         
-        # TODO: Upload to S3 in production
-        # For now, save locally for development
+        # Save to local storage (Render persistent disk)
         import aiofiles
-        local_path = f"uploads/{file_key}"
+        import os
+        local_path = f"{settings.UPLOAD_DIR}/{file_key}"
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         
         async with aiofiles.open(local_path, 'wb') as f:

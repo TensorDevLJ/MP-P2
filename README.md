@@ -372,3 +372,6 @@ The AI models provide insights based on patterns in data but cannot account for 
 ---
 
 **Built with ❤️ for mental health awareness and support**
+
+
+
