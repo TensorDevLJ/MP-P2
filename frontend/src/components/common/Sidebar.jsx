@@ -2,12 +2,9 @@ import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
-  Brain, 
+  FileText, 
   MessageCircle, 
-  MapPin, 
-  TrendingUp, 
   Settings,
-  HelpCircle,
   X
 } from 'lucide-react';
 import { ROUTES } from '../../utils/constants';
@@ -17,11 +14,8 @@ const Sidebar = ({ isOpen, onClose }) => {
 
   const navigation = [
     { name: 'Dashboard', href: ROUTES.DASHBOARD, icon: LayoutDashboard },
-    { name: 'Analyze EEG', href: ROUTES.ANALYZE, icon: Brain },
-    { name: 'Health Assistant', href: ROUTES.ASSISTANT, icon: MessageCircle },
-    { name: 'Find Care', href: ROUTES.CARE, icon: MapPin },
-    { name: 'Progress', href: ROUTES.TRENDS, icon: TrendingUp },
-    { name: 'How to Use', href: ROUTES.HOW_TO_USE, icon: HelpCircle },
+    { name: 'Analyze Text', href: ROUTES.ANALYZE, icon: FileText },
+    { name: 'AI Assistant', href: ROUTES.ASSISTANT, icon: MessageCircle },
     { name: 'Settings', href: ROUTES.SETTINGS, icon: Settings },
   ];
 
@@ -80,11 +74,11 @@ const Sidebar = ({ isOpen, onClose }) => {
           })}
         </nav>
 
-        {/* Footer info */}
+        {/* Footer */}
         <div className="px-4 py-4 border-t border-gray-200">
           <div className="text-xs text-gray-500 text-center">
             <p className="font-medium mb-1">AI-Powered Analysis</p>
-            <p>Not a replacement for professional medical advice</p>
+            <p>Not a replacement for professional care</p>
           </div>
         </div>
       </div>

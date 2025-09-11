@@ -1,8 +1,8 @@
 import React from 'react';
-import ChatBot from '../components/chat/ChatBot';
+import SimpleChat from '../components/analysis/SimpleChat';
 
 const AssistantPage = () => {
-  return <ChatBot />;
+  return <SimpleChat />;
 };
 
 export default AssistantPage;

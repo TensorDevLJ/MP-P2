@@ -5,43 +5,32 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
   ANALYZE: '/analyze',
   ASSISTANT: '/assistant',
-  CARE: '/care',
-  TRENDS: '/trends',
   SETTINGS: '/settings',
-  HOW_TO_USE: '/how-to-use',
   LOGIN: '/login',
   SIGNUP: '/signup',
 };
 
-export const MENTAL_HEALTH_STATES = {
-  STABLE: { 
-    label: 'Stable', 
+export const DEPRESSION_LEVELS = {
+  not_depressed: { 
+    label: 'Not Depressed', 
     color: 'success', 
-    description: 'Mental state appears balanced and healthy' 
+    description: 'No significant depression indicators detected' 
   },
-  MILD: { 
-    label: 'Mild Concern', 
+  mild: { 
+    label: 'Mild Depression', 
     color: 'warning', 
-    description: 'Some signs of stress or mood changes' 
+    description: 'Early stage depression, manageable with self-care' 
   },
-  MODERATE: { 
-    label: 'Moderate Risk', 
-    color: 'warning', 
-    description: 'Notable symptoms requiring attention' 
-  },
-  HIGH: { 
-    label: 'High Risk', 
+  moderate: { 
+    label: 'Moderate Depression', 
     color: 'error', 
-    description: 'Significant concerns requiring immediate support' 
+    description: 'Clear symptoms present, professional support recommended' 
   },
-};
-
-export const EEG_BANDS = {
-  delta: { range: '0.5-4 Hz', color: '#8B5CF6', name: 'Delta' },
-  theta: { range: '4-8 Hz', color: '#06B6D4', name: 'Theta' },
-  alpha: { range: '8-13 Hz', color: '#10B981', name: 'Alpha' },
-  beta: { range: '13-30 Hz', color: '#F59E0B', name: 'Beta' },
-  gamma: { range: '30-50 Hz', color: '#EF4444', name: 'Gamma' },
+  severe: { 
+    label: 'Severe Depression', 
+    color: 'error', 
+    description: 'Significant impairment, immediate professional help needed' 
+  },
 };
 
 export const CRISIS_RESOURCES = [

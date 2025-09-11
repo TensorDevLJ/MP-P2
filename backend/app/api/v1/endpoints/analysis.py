@@ -1,173 +1,139 @@
 """
-Combined analysis endpoints (EEG + Text fusion)
+Simplified analysis endpoints
 """
-from typing import Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from typing import Any
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 import structlog
+import aiofiles
+import os
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.session import AnalysisSession, TextInput
-from app.schemas.analysis import CombinedAnalysisRequest, CombinedAnalysisResponse
-from app.services.ml.fusion_engine import FusionEngine
-from app.tasks.celery_tasks import process_combined_analysis
+from app.models.session import AnalysisSession
+from app.services.depression_classifier import DepressionClassifier
+from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
-@router.post("/combined", response_model=dict)
-async def start_combined_analysis(
-    request: CombinedAnalysisRequest,
-    background_tasks: BackgroundTasks,
+@router.post("/text")
+async def analyze_text(
+    text: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Any:
-    """Start combined EEG + Text analysis"""
+    """Analyze text for depression indicators"""
     
-    if not request.file_key and not request.text_input:
+    if len(text.strip()) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either EEG file or text input is required"
+            detail="Text must be at least 10 characters long"
         )
     
-    # Create combined analysis session
-    session = AnalysisSession(
-        user_id=current_user.id,
-        session_type="combined",
-        file_key=request.file_key,
-        sampling_rate=request.sampling_rate,
-        channel=request.channel,
-        epoch_length=request.epoch_length or 2.0,
-        overlap=request.overlap or 0.5,
-        status="pending"
-    )
-    
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    
-    # Add text input if provided
-    if request.text_input:
-        import hashlib
-        content_hash = hashlib.sha256(request.text_input.encode()).hexdigest()
-        
-        text_input = TextInput(
-            session_id=session.id,
-            content=request.text_input,  # TODO: Encrypt in production
-            content_hash=content_hash
+    try:
+        # Create session
+        session = AnalysisSession(
+            user_id=current_user.id,
+            text_input=text,
+            status="processing"
         )
-        db.add(text_input)
+        db.add(session)
         db.commit()
-    
-    # Queue background processing
-    background_tasks.add_task(
-        process_combined_analysis,
-        session_id=str(session.id),
-        user_id=str(current_user.id)
-    )
-    
-    logger.info(
-        "Combined analysis queued",
-        session_id=str(session.id),
-        user_id=str(current_user.id),
-        has_eeg=bool(request.file_key),
-        has_text=bool(request.text_input)
-    )
-    
-    return {
-        "job_id": str(session.id),
-        "status": "queued",
-        "message": "Combined analysis started"
-    }
-
-@router.get("/result/{job_id}", response_model=CombinedAnalysisResponse)
-async def get_combined_result(
-    job_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-) -> Any:
-    """Get combined analysis results"""
-    
-    session = db.query(AnalysisSession).filter(
-        AnalysisSession.id == job_id,
-        AnalysisSession.user_id == current_user.id
-    ).first()
-    
-    if not session:
+        db.refresh(session)
+        
+        # Analyze text
+        classifier = DepressionClassifier()
+        result = classifier.analyze_text(text)
+        
+        # Update session with results
+        session.depression_result = result['depression_level']
+        session.confidence_score = result['confidence']
+        session.detailed_analysis = result
+        session.status = "completed"
+        session.completed_at = func.now()
+        
+        db.commit()
+        
+        logger.info("Text analysis completed", 
+                   session_id=session.id,
+                   result=result['depression_level'])
+        
+        return {
+            'session_id': session.id,
+            'depression_level': result['depression_level'],
+            'confidence': result['confidence'],
+            'explanation': result['explanation'],
+            'stage': _get_depression_stage(result['depression_level']),
+            'recommendations': _get_recommendations(result['depression_level'])
+        }
+        
+    except Exception as e:
+        logger.error("Text analysis failed", error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis session not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis failed: {str(e)}"
         )
-    
-    if session.status == "pending":
-        return CombinedAnalysisResponse(
-            session_id=job_id,
-            status="pending",
-            message="Analysis in progress"
-        )
-    
-    if session.status == "failed":
-        return CombinedAnalysisResponse(
-            session_id=job_id,
-            status="failed",
-            message=session.error_message or "Analysis failed"
-        )
-    
-    # Generate recommendations based on results
-    from app.services.recommendations import RecommendationEngine
-    recommender = RecommendationEngine()
-    recommendations = recommender.generate_recommendations(
-        emotion_results=session.emotion_results,
-        anxiety_results=session.anxiety_results,
-        depression_results=session.depression_results,
-        fusion_results=session.fusion_results,
-        user_preferences=current_user.preferences
-    )
-    
-    return CombinedAnalysisResponse(
-        session_id=job_id,
-        status="completed",
-        emotion_results=session.emotion_results,
-        anxiety_results=session.anxiety_results,
-        depression_results=session.depression_results,
-        fusion_results=session.fusion_results,
-        explanations=session.explanations,
-        recommendations=recommendations,
-        charts_data=session.eeg_features.get("charts") if session.eeg_features else None,
-        processing_time=(
-            session.processing_completed_at - session.processing_started_at
-        ).total_seconds() if session.processing_completed_at else None,
-    )
 
 @router.get("/sessions")
 async def get_user_sessions(
-    skip: int = 0,
-    limit: int = 10,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Any:
-    """Get user's analysis sessions history"""
+    """Get user's analysis history"""
     
     sessions = db.query(AnalysisSession).filter(
         AnalysisSession.user_id == current_user.id
-    ).order_by(
-        AnalysisSession.created_at.desc()
-    ).offset(skip).limit(limit).all()
+    ).order_by(AnalysisSession.created_at.desc()).limit(20).all()
     
     return {
-        "sessions": [
+        'sessions': [
             {
-                "id": str(session.id),
-                "type": session.session_type,
-                "status": session.status,
-                "created_at": session.created_at,
-                "has_results": bool(session.fusion_results)
+                'id': session.id,
+                'depression_level': session.depression_result,
+                'confidence': session.confidence_score,
+                'created_at': session.created_at,
+                'status': session.status
             }
             for session in sessions
-        ],
-        "total": db.query(AnalysisSession).filter(
-            AnalysisSession.user_id == current_user.id
-        ).count()
+        ]
     }
+
+def _get_depression_stage(level: str) -> str:
+    """Convert level to stage description"""
+    stages = {
+        'not_depressed': 'No Depression',
+        'mild': 'Mild Depression - Early Stage',
+        'moderate': 'Moderate Depression - Intervention Needed',
+        'severe': 'Severe Depression - Immediate Support Required'
+    }
+    return stages.get(level, 'Unknown')
+
+def _get_recommendations(level: str) -> list:
+    """Get recommendations based on depression level"""
+    
+    recommendations = {
+        'not_depressed': [
+            "Continue with healthy habits and regular self-care",
+            "Practice gratitude and maintain social connections",
+            "Keep up with regular exercise and good sleep"
+        ],
+        'mild': [
+            "Try daily meditation or mindfulness exercises",
+            "Increase physical activity and outdoor time",
+            "Consider talking to a counselor if symptoms persist"
+        ],
+        'moderate': [
+            "Schedule an appointment with a mental health professional",
+            "Practice stress management techniques daily",
+            "Reach out to trusted friends or family for support"
+        ],
+        'severe': [
+            "Seek immediate professional help from a psychiatrist or therapist",
+            "Contact crisis support if having thoughts of self-harm",
+            "Consider intensive treatment options with professional guidance"
+        ]
+    }
+    
+    return recommendations.get(level, ["Consult with a healthcare professional"])
