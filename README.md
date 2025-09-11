@@ -1,5 +1,6 @@
 # EEG Mental Health Assistant
 
+
 A privacy-first, AI-powered mental health companion that combines EEG brain wave analysis with text sentiment analysis to provide personalized mental wellness insights and recommendations.
 
 ## 🧠 Overview
